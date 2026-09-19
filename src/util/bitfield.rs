@@ -1,26 +1,42 @@
 use std::ops::Div;
 
+static BIT_COUNT: usize = 8;
+
 pub(crate) struct BitField {
     bits: Vec<u8>,
 }
 
 impl BitField {
     pub fn new(bit_count: usize) -> Self {
+        let mut bits = Vec::new();
+        bits.resize(bit_count.div_ceil(BIT_COUNT), 0);
         BitField {
-            bits: Vec::with_capacity(bit_count.div_ceil(8) as usize)
+            bits,
         }
     }
 
     pub fn get(&self, bit: usize) -> bool {
-        self.bits[bit / 8] & (bit % 8) as u8 != 0
+        self.bits[bit / BIT_COUNT] & (1 << (bit % BIT_COUNT)) as u8 != 0
     }
 
     pub fn set(&mut self, bit: usize, val: bool) {
         if val {
-            self.bits[bit / 8] |= 1 << (bit % 8);
+            self.bits[bit / BIT_COUNT] |= 1 << (bit % BIT_COUNT);
         } else {
-            self.bits[bit / 8] &= !(1 << (bit % 8));
+            self.bits[bit / BIT_COUNT] &= !(1 << (bit % BIT_COUNT));
         }
+    }
+
+    pub fn up(&mut self, bit: usize) {
+        self.set(bit, true);
+    }
+
+    pub fn down(&mut self, bit: usize) {
+        self.set(bit, false);
+    }
+
+    pub fn bit_count(&self) -> usize {
+        self.bits.len() * BIT_COUNT
     }
 }
 
@@ -32,7 +48,7 @@ mod tests {
     fn test_correct_size() {
         assert_eq!(BitField::new(9).bits.len(), 2);
         assert_eq!(BitField::new(8).bits.len(), 1);
-        assert_eq!(BitField::new(7).bits.len(), 1);
+        assert_eq!(BitField::new( 7).bits.len(), 1);
         assert_eq!(BitField::new(16).bits.len(), 2);
         assert_eq!(BitField::new(17).bits.len(), 3);
     }
@@ -40,11 +56,11 @@ mod tests {
     #[test]
     fn test_get_set() {
         let mut bf = BitField::new(16);
+        bf.set(0, true);
         bf.set(3, true);
         bf.set(4, true);
         bf.set(10, true);
         bf.set(15, true);
-        bf.set(0, true);
 
         assert_eq!(bf.get(0), true);
         assert_eq!(bf.get(1), false);

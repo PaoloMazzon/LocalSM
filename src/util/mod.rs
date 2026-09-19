@@ -1,3 +1,3 @@
 pub mod config;
-pub(crate) mod bloomfield;
+pub(crate) mod bloomfilter;
 mod bitfield;
