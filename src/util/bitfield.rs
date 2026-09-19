@@ -1,7 +1,9 @@
 use std::ops::Div;
+use serde::{Deserialize, Serialize};
 
 static BIT_COUNT: usize = 8;
 
+#[derive(Serialize, Deserialize)]
 pub(crate) struct BitField {
     bits: Vec<u8>,
 }

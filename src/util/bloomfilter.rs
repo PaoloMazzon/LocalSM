@@ -1,7 +1,11 @@
 use std::hash::{BuildHasher, Hash, Hasher};
 use rapidhash::fast::SeedableState;
+use rapidhash::v3::{rapidhash_v3_seeded, RapidSecrets};
 use rustc_hash::FxHasher;
+use serde::{Deserialize, Serialize};
 use crate::util::bitfield::BitField;
+
+static RAPID_SECRET: RapidSecrets = RapidSecrets::seed(0x123456);
 
 /// Some tests were done to find a decent trade-off between bit count performance and false-positive
 /// rate. Effectively, with 140 items in the bloom filter (and 230 not-present test samples) and
@@ -9,17 +13,17 @@ use crate::util::bitfield::BitField;
 ///  - Average of 206.72ns per 10-character query
 ///  - ~5% false positive rate
 /// Leading me to believe that for datasets ~100-200 items, 1024 bits and 3 hashes should suffice.
-pub(crate) struct BloomFilter<'a> {
+#[derive(Serialize, Deserialize)]
+pub(crate) struct BloomFilter {
     bits: BitField,
     hash_count: usize,
-    rapid_hash: SeedableState<'a>,
 }
 
-impl<'a> BloomFilter<'a> {
+impl BloomFilter {
     fn get_n_hashes(&self, string: &str) -> Vec<usize> {
         let mut fx_hasher = FxHasher::default();
         string.hash(&mut fx_hasher);
-        let hash_1 = self.rapid_hash.hash_one(string) as usize;
+        let hash_1 = rapidhash_v3_seeded(string.as_bytes(), &RAPID_SECRET) as usize;
         let hash_2 = fx_hasher.finish() as usize;
         let mut hashes = Vec::from([
             hash_1 % self.bits.bit_count(),
@@ -35,11 +39,9 @@ impl<'a> BloomFilter<'a> {
     /// Bit count is rounded up to the nearest 8, and hash count can be anything greater than 1.
     pub fn init(bit_count: usize, hash_count: usize) -> Self {
         assert!(hash_count > 1);
-        let rapid_hash = SeedableState::fixed();
         BloomFilter {
             bits: BitField::new(bit_count),
             hash_count,
-            rapid_hash,
         }
     }
 

@@ -1,7 +1,8 @@
 extern crate core;
 
-pub mod util;
 use spdlog::prelude::*;
+mod util;
+mod ilog;
 use crate::util::config::Config;
 
 pub struct LocalSm {
