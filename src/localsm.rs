@@ -1,7 +1,7 @@
 extern crate core;
 
 use spdlog::prelude::*;
-mod util;
+pub mod util;
 mod ilog;
 use crate::util::config::Config;
 
