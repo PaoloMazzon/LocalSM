@@ -16,6 +16,12 @@ pub struct Config {
     
     /// How many bytes each record is allowed to be
     record_allowable_size: u32,
+    
+    /// Directory where system-files like temporary cache and settings are stored
+    system_directory: String,
+    
+    /// Additional directories where SSTables may be stored to, if empty only system_directory is used
+    data_directory: Vec<String>,
 }
 
 impl Default for Config {
@@ -31,6 +37,8 @@ impl Default for Config {
             entries_per_record: 100,
             worker_threads: base_thread_count as u32,
             record_allowable_size: 1024 * 1024 * 10,
+            system_directory: "/var/localsm/".to_string(),
+            data_directory: Vec::new(),
         }
     }
 }
