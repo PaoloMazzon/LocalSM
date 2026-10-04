@@ -2,6 +2,5 @@
 pub enum LsmError {
     BinaryEncodingError(String),
     FileNotAvailable(String),
+    JsonEncodingError(String),
 }
-
-
