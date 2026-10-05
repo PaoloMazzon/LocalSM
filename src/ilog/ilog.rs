@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use serde::{Deserialize, Serialize};
+use spdlog::prelude::*;
 use crate::util::error::LsmError;
 use crate::util::time::get_iso_time;
 
@@ -28,6 +29,7 @@ pub(crate) struct ILog {
 pub(crate) struct MemTable {
     records: Vec<ILog>,
     cache_file: File,
+    cache_file_location: String,
 }
 
 impl MemTable {
@@ -37,12 +39,22 @@ impl MemTable {
         Ok(Self {
             records: Vec::new(),
             cache_file: File::create(Path::new(cache_file.as_str())).map_err(|e| LsmError::FileNotAvailable(format!("{:?}", e)))?,
+            cache_file_location: cache_file,
         })
     }
 
     /// Creates a MemTable by recovering from a cache file
     pub fn recover(cache_file: String) -> Self {
-        todo!("this")
+        todo!("read jsons line by line")
+    }
+
+    /// Adds a line to the log file with a trailing newline
+    fn add_to_log(&mut self, line: String) -> Result<(), LsmError> {
+        let total_string = line + "\n";
+        self.cache_file.write_all(total_string.as_bytes())
+            .map_err(|e| LsmError::FileNotAvailable(format!("{:?}", e)))?;
+        self.cache_file.flush()
+            .map_err(|e| LsmError::FileNotAvailable(format!("{:?}", e)))
     }
 
     /// Adds a new record to the in-memory map and the crash-recovery file.
@@ -55,9 +67,8 @@ impl MemTable {
             timestamp: get_iso_time(),
             tombstone: false,
         };
-        self.cache_file.write_all(serde_json::to_string(&log)
-            .map_err(|e| LsmError::JsonEncodingError(format!("{:?}", e)))?.as_bytes())
-            .map_err(|e| LsmError::FileNotAvailable(format!("{:?}", e)))?;
+        self.add_to_log(serde_json::to_string(&log)
+            .map_err(|e| LsmError::JsonEncodingError(format!("{:?}", e)))?)?;
         self.records.push(log);
         Ok(())
     }
@@ -71,9 +82,8 @@ impl MemTable {
             timestamp: get_iso_time(),
             tombstone: true,
         };
-        self.cache_file.write_all(serde_json::to_string(&log)
-            .map_err(|e| LsmError::JsonEncodingError(format!("{:?}", e)))?.as_bytes())
-            .map_err(|e| LsmError::FileNotAvailable(format!("{:?}", e)))?;
+        self.add_to_log(serde_json::to_string(&log)
+            .map_err(|e| LsmError::JsonEncodingError(format!("{:?}", e)))?)?;
         self.records.push(log);
         Ok(())
     }
@@ -96,6 +106,14 @@ impl MemTable {
     }
 
     // TODO: Serialize to an SSTable
+}
+
+impl Drop for MemTable {
+    fn drop(&mut self) {
+        if let Err(e) = std::fs::remove_file(Path::new(self.cache_file_location.as_str())) {
+            error!("Failed to remove cache file for a MemTable at {}, {:?}", self.cache_file_location, e);
+        }
+    }
 }
 
 #[cfg(test)]
