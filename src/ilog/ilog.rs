@@ -133,7 +133,11 @@ impl MemTable {
         }
     }
 
-    // TODO: Serialize to an SSTable
+    /// Exports the whole in-memory table to an immutable SSTable that can be dumped
+    /// to a file or NAS or whatever
+    pub fn export_to_sstable(&self) -> Result<Vec<u8>, LsmError> {
+        Err(LsmError::Unknown("".to_string()))
+    }
 }
 
 impl Drop for MemTable {
@@ -172,6 +176,17 @@ mod tests {
 
     #[test]
     fn test_recovery() {
-        todo!("test the recovery method")
+        let mut mt = MemTable::new("/tmp/recover.log".to_string()).unwrap();
+        mt.add(10, "key".to_string(), vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.delete(10, "key".to_string()).unwrap();
+        mt.add(11, "key".to_string(), vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(12, "key".to_string(), vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(20, "test".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+
+        let loaded_table = MemTable::recover("/tmp/recover.log".to_string()).unwrap();
+        assert!(!loaded_table.has(10, "key".to_string()), "Tombstone was not loaded properly.");
+        assert!(loaded_table.has(11, "key".to_string()), "Value was not loaded properly.");
+        assert!(loaded_table.has(12, "key".to_string()), "Value was not loaded properly.");
+        assert_eq!(loaded_table.get(20, "test".to_string()).unwrap().value, vec![1, 1, 2, 3, 4, 5, 6, 7], "Value was not loaded or parsed properly.");
     }
 }

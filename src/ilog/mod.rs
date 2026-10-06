@@ -1,2 +1,2 @@
 pub(crate) mod ilog;
-mod binary_ilog;
+pub(crate) mod sstable;
