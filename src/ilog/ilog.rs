@@ -1,5 +1,5 @@
-use std::fs::File;
-use std::io::Write;
+use std::fs::{read, File, OpenOptions};
+use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use serde::{Deserialize, Serialize};
 use spdlog::prelude::*;
@@ -44,8 +44,36 @@ impl MemTable {
     }
 
     /// Creates a MemTable by recovering from a cache file
-    pub fn recover(cache_file: String) -> Self {
-        todo!("read jsons line by line")
+    pub fn recover(cache_file_location: String) -> Result<Self, LsmError> {
+        let file = File::open(cache_file_location.as_str())
+            .map_err(|e| LsmError::FileNotAvailable(format!("{:?}", e)))?;
+        let reader = BufReader::new(file);
+
+        let cache_file = OpenOptions::new()
+            .append(true)
+            .open(cache_file_location.as_str())
+            .map_err(|e| LsmError::FileNotAvailable(format!("{:?}", e)))?;
+        let mut return_table = Self {
+            records: Vec::new(),
+            cache_file,
+            cache_file_location: cache_file_location.clone(),
+        };
+
+        // Iterate over the lines lazily
+        for line in reader.lines() {
+            match line {
+                Ok(json) => {
+                    return_table.records.push(serde_json::from_str(json.as_str())
+                        .map_err(|e| LsmError::JsonEncodingError(format!("Failed to deserialize JSON line {} for MemTable recovery, {:?}", json, e)))?);
+                },
+                Err(e) => {
+                    error!("Failed to recover line from file {}, {:?}", cache_file_location, e);
+                    break;
+                }
+            }
+        }
+
+        Ok(return_table)
     }
 
     /// Adds a line to the log file with a trailing newline
@@ -140,5 +168,10 @@ mod tests {
         mt.add(11, "key2".to_string(), vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
         mt.add(12, "key2".to_string(), vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
         mt.add(100, "key3".to_string(), vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+    }
+
+    #[test]
+    fn test_recovery() {
+        todo!("test the recovery method")
     }
 }
