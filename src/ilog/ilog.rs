@@ -2,8 +2,12 @@ use std::fs::{read, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use serde::{Deserialize, Serialize};
+use serde_binary::binary_stream::Endian;
 use spdlog::prelude::*;
-use crate::util::error::LsmError;
+use crate::ilog::sstable::{SparseKeyIdTable, SSTABLE_MAGIC_BYTES};
+use crate::util::bloomfilter::BloomFilter;
+use crate::util::config::Config;
+use crate::util::error::Result;
 use crate::util::time::get_iso_time;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -35,24 +39,22 @@ pub(crate) struct MemTable {
 impl MemTable {
     /// Creates a new MemTable that uses a specified cache file as its crash recovery
     /// file. It does not attempt to load from that file, it will be overwritten.
-    pub fn new(cache_file: String) -> Result<Self, LsmError> {
+    pub fn new(cache_file: String) -> Result<Self> {
         Ok(Self {
             records: Vec::new(),
-            cache_file: File::create(Path::new(cache_file.as_str())).map_err(|e| LsmError::FileNotAvailable(format!("{:?}", e)))?,
+            cache_file: File::create(Path::new(cache_file.as_str()))?,
             cache_file_location: cache_file,
         })
     }
 
     /// Creates a MemTable by recovering from a cache file
-    pub fn recover(cache_file_location: String) -> Result<Self, LsmError> {
-        let file = File::open(cache_file_location.as_str())
-            .map_err(|e| LsmError::FileNotAvailable(format!("{:?}", e)))?;
+    pub fn recover(cache_file_location: String) -> Result<Self> {
+        let file = File::open(cache_file_location.as_str())?;
         let reader = BufReader::new(file);
 
         let cache_file = OpenOptions::new()
             .append(true)
-            .open(cache_file_location.as_str())
-            .map_err(|e| LsmError::FileNotAvailable(format!("{:?}", e)))?;
+            .open(cache_file_location.as_str())?;
         let mut return_table = Self {
             records: Vec::new(),
             cache_file,
@@ -63,8 +65,7 @@ impl MemTable {
         for line in reader.lines() {
             match line {
                 Ok(json) => {
-                    return_table.records.push(serde_json::from_str(json.as_str())
-                        .map_err(|e| LsmError::JsonEncodingError(format!("Failed to deserialize JSON line {} for MemTable recovery, {:?}", json, e)))?);
+                    return_table.records.push(serde_json::from_str(json.as_str())?);
                 },
                 Err(e) => {
                     error!("Failed to recover line from file {}, {:?}", cache_file_location, e);
@@ -77,17 +78,16 @@ impl MemTable {
     }
 
     /// Adds a line to the log file with a trailing newline
-    fn add_to_log(&mut self, line: String) -> Result<(), LsmError> {
+    fn add_to_log(&mut self, line: String) -> Result<()> {
         let total_string = line + "\n";
-        self.cache_file.write_all(total_string.as_bytes())
-            .map_err(|e| LsmError::FileNotAvailable(format!("{:?}", e)))?;
-        self.cache_file.flush()
-            .map_err(|e| LsmError::FileNotAvailable(format!("{:?}", e)))
+        self.cache_file.write_all(total_string.as_bytes())?;
+        self.cache_file.flush()?;
+        Ok(())
     }
 
     /// Adds a new record to the in-memory map and the crash-recovery file.
     /// This does not assign unique sort_keys as those must be acquired elsewhere.
-    pub fn add(&mut self, sort_key: i64, key: String, val: Vec<u8>) -> Result<(), LsmError> {
+    pub fn add(&mut self, sort_key: i64, key: String, val: Vec<u8>) -> Result<()> {
         let log = ILog {
             key: key.clone(),
             sort_key,
@@ -95,14 +95,13 @@ impl MemTable {
             timestamp: get_iso_time(),
             tombstone: false,
         };
-        self.add_to_log(serde_json::to_string(&log)
-            .map_err(|e| LsmError::JsonEncodingError(format!("{:?}", e)))?)?;
+        self.add_to_log(serde_json::to_string(&log)?)?;
         self.records.push(log);
         Ok(())
     }
 
     /// Deletes a record
-    pub fn delete(&mut self, sort_key: i64, key: String) -> Result<(), LsmError> {
+    pub fn delete(&mut self, sort_key: i64, key: String) -> Result<()> {
         let log = ILog {
             key: key.clone(),
             sort_key,
@@ -110,8 +109,7 @@ impl MemTable {
             timestamp: get_iso_time(),
             tombstone: true,
         };
-        self.add_to_log(serde_json::to_string(&log)
-            .map_err(|e| LsmError::JsonEncodingError(format!("{:?}", e)))?)?;
+        self.add_to_log(serde_json::to_string(&log)?)?;
         self.records.push(log);
         Ok(())
     }
@@ -133,10 +131,40 @@ impl MemTable {
         }
     }
 
+    /// Creates a bloom filter from the existing records in this MemTable
+    fn create_bloom_filter(&self, config: &Config) -> BloomFilter {
+        let mut bloom = BloomFilter::init(config.bloom_filter_bits as usize, config.bloom_filter_hashes as usize);
+        for record in &self.records {
+            bloom.add(record.key.as_str());
+        }
+        bloom
+    }
+
+    /// Creates the sparse key/id table for this MemTable and returns it
+    fn create_sparse_table(&self, config: &Config) -> SparseKeyIdTable {
+        todo!("")
+    }
+
     /// Exports the whole in-memory table to an immutable SSTable that can be dumped
-    /// to a file or NAS or whatever
-    pub fn export_to_sstable(&self) -> Result<Vec<u8>, LsmError> {
-        Err(LsmError::Unknown("".to_string()))
+    /// to a file or NAS or whatever. This can write partial amounts then fail.
+    pub fn export_to_sstable(&self, config: &Config, dest: &mut impl std::io::Write) -> Result<()> {
+        // Encode the header information, including the bloom filter and sparse table
+        dest.write_all(&SSTABLE_MAGIC_BYTES)?;
+        let bloom_filter = serde_binary::to_vec(&self.create_bloom_filter(config), Endian::Little)?;
+        let sparse_table = serde_binary::to_vec(&self.create_sparse_table(config), Endian::Little)?;
+        dest.write_all((bloom_filter.len() as u32).to_le_bytes().as_slice())?;
+        dest.write_all((sparse_table.len() as u32).to_le_bytes().as_slice())?;
+        dest.write_all(&bloom_filter)?;
+        dest.write_all(&sparse_table)?;
+
+        // Iterate over all records and encode those too
+        for record in &self.records {
+            let binary_record = serde_binary::to_vec(record, Endian::Little)?;
+            dest.write_all((binary_record.len() as u32).to_le_bytes().as_slice())?;
+            dest.write_all(&binary_record)?;
+        }
+
+        Ok(())
     }
 }
 

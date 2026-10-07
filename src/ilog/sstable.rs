@@ -1,12 +1,14 @@
 use std::io::BufRead;
 use serde::{Deserialize, Serialize};
 use crate::util::bloomfilter::BloomFilter;
-use crate::util::error::LsmError;
+use crate::util::error::Result;
+
+pub(crate) static SSTABLE_MAGIC_BYTES: [u8; 4] = [255, 92, 54, 92];
 
 /********************* SSTable binary format *********************/
 /* 1. 4 byte header                                              */
-/* 2. 4 bytes for the size of BloomFilterPair struct             */
-/* 3. BloomFilterPair struct of size previously stated in (2)    */
+/* 2. 4 bytes for the size of BloomFilter struct                 */
+/* 3. BloomFilter struct of size previously stated in (2)        */
 /* 4. Size of SparseKeyIdTable                                   */
 /* 5. SparseKeyIdTable struct of size previously stated in (4)   */
 /* 6. For the remainder of the file (until EOF),                 */
@@ -30,29 +32,22 @@ pub(crate) struct SparseKeyIdTable {
     key_ids: Vec<EntryLocation>,
 }
 
-/// Each table contains a bloom filter for the ids and keys
-#[derive(Serialize, Deserialize)]
-pub(crate) struct BloomFilterPair {
-    id_filter: BloomFilter,
-    key_filter: BloomFilter,
-}
-
 /// Returns true if a table contains a given key/id pair
-pub(crate) fn table_contains(buffer: impl BufRead, id: i64, key: String) -> Result<bool, LsmError> {
+pub(crate) fn table_contains(buffer: impl BufRead, id: i64, key: String) -> Result<bool> {
     todo!("")
 }
 
 /// Returns true if a table contains a key with any id
-pub(crate) fn table_contains_key(buffer: impl BufRead, key: String) -> Result<bool, LsmError> {
+pub(crate) fn table_contains_key(buffer: impl BufRead, key: String) -> Result<bool> {
     todo!("")
 }
 
 /// Returns the bloom filters in an sstable
-pub(crate) fn get_bloom_filters(buffer: impl BufRead) -> Result<BloomFilterPair, LsmError> {
+pub(crate) fn get_bloom_filter(buffer: impl BufRead) -> Result<BloomFilter> {
     todo!("")
 }
 
 /// Gets a value from an sstable, can fail if that value doesn't exist in it
-pub(crate) fn get_from_table(buffer: impl BufRead, id: i64, key: String) -> Result<Vec<u8>, LsmError> {
+pub(crate) fn get_from_table(buffer: impl BufRead, id: i64, key: String) -> Result<Vec<u8>> {
     todo!("")
 }
