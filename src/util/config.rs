@@ -9,7 +9,10 @@ pub struct Config {
     pub bloom_filter_hashes: u32,
 
     /// Entries per record stored on disk and in memory
-    pub entries_per_record: u32,
+    pub entries_per_sstable: u32,
+
+    /// How many records should be held in sparse key/id tables
+    pub sparse_table_record_count: u32,
 
     /// Background worker threads, must be at least 1
     pub worker_threads: u32,
@@ -34,7 +37,8 @@ impl Default for Config {
         Config {
             bloom_filter_bits: 1000,
             bloom_filter_hashes: 3,
-            entries_per_record: 100,
+            entries_per_sstable: 100,
+            sparse_table_record_count: 10,
             worker_threads: base_thread_count as u32,
             record_allowable_size: 1024 * 1024 * 10,
             system_directory: "/var/localsm/".to_string(),

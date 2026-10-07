@@ -1,10 +1,11 @@
+use std::cmp::Ordering;
 use std::fs::{read, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use serde::{Deserialize, Serialize};
 use serde_binary::binary_stream::Endian;
 use spdlog::prelude::*;
-use crate::ilog::sstable::{SparseKeyIdTable, SSTABLE_MAGIC_BYTES};
+use crate::ilog::sstable::{EntryLocation, SparseKeyIdTable, SSTABLE_ENCODING_VERSION, SSTABLE_MAGIC_BYTES};
 use crate::util::bloomfilter::BloomFilter;
 use crate::util::config::Config;
 use crate::util::error::Result;
@@ -140,18 +141,58 @@ impl MemTable {
         bloom
     }
 
-    /// Creates the sparse key/id table for this MemTable and returns it
-    fn create_sparse_table(&self, config: &Config) -> SparseKeyIdTable {
-        todo!("")
+    /// Creates the sparse key/id table for this MemTable and returns it. This is quite heavy
+    /// as it needs to sort the entire records list and binary encode every member to get its
+    /// size for the entries sparse lookup table.
+    fn create_sparse_table(&mut self, config: &Config) -> Result<SparseKeyIdTable> {
+        self.records.sort_unstable_by(|x, y| {
+            if x.key < y.key {
+                return Ordering::Less
+            } else if x.key > y.key {
+                return Ordering::Greater
+            }
+            if x.sort_key < y.sort_key {
+                return Ordering::Less
+            } else if x.sort_key > y.sort_key {
+                return Ordering::Greater
+            }
+            Ordering::Equal
+        });
+
+        let mut table = SparseKeyIdTable {
+            key_ids: Vec::new()
+        };
+
+        // We write records every n times, counting the distance to each
+        let mut total_size = 0;
+        let mut counter = 0;
+        for record in &self.records {
+            // Record this entry
+            if counter % config.sparse_table_record_count == 0 {
+                table.key_ids.push(EntryLocation {
+                    key: record.key.clone(),
+                    sort_key: record.sort_key,
+                    location: total_size,
+                })
+            }
+
+            // Just add the size of this record
+            total_size += 4;
+            total_size += serde_binary::to_vec(record, Endian::Little)?.len() as u64;
+            counter += 1;
+        }
+
+        Ok(table)
     }
 
     /// Exports the whole in-memory table to an immutable SSTable that can be dumped
     /// to a file or NAS or whatever. This can write partial amounts then fail.
-    pub fn export_to_sstable(&self, config: &Config, dest: &mut impl std::io::Write) -> Result<()> {
+    pub fn export_to_sstable(&mut self, config: &Config, dest: &mut impl std::io::Write) -> Result<()> {
         // Encode the header information, including the bloom filter and sparse table
         dest.write_all(&SSTABLE_MAGIC_BYTES)?;
+        dest.write_all(SSTABLE_ENCODING_VERSION.to_le_bytes().as_slice())?;
         let bloom_filter = serde_binary::to_vec(&self.create_bloom_filter(config), Endian::Little)?;
-        let sparse_table = serde_binary::to_vec(&self.create_sparse_table(config), Endian::Little)?;
+        let sparse_table = serde_binary::to_vec(&self.create_sparse_table(config)?, Endian::Little)?;
         dest.write_all((bloom_filter.len() as u32).to_le_bytes().as_slice())?;
         dest.write_all((sparse_table.len() as u32).to_le_bytes().as_slice())?;
         dest.write_all(&bloom_filter)?;
@@ -216,5 +257,36 @@ mod tests {
         assert!(loaded_table.has(11, "key".to_string()), "Value was not loaded properly.");
         assert!(loaded_table.has(12, "key".to_string()), "Value was not loaded properly.");
         assert_eq!(loaded_table.get(20, "test".to_string()).unwrap().value, vec![1, 1, 2, 3, 4, 5, 6, 7], "Value was not loaded or parsed properly.");
+    }
+
+    #[test]
+    fn test_serializing_sstable() {
+        let mut mt = MemTable::new("/tmp/fake_recover.log".to_string()).unwrap();
+        let config = Config {
+            sparse_table_record_count: 5,
+            entries_per_sstable: 20,
+            ..Default::default()
+        };
+        mt.delete(0, "key".to_string()).unwrap();
+        mt.add(1, "asd".to_string(), vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(2, "fgh".to_string(), vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(3, "hjk".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(4, "qwe".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(5, "wer".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(6, "ert".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(7, "rty".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(8, "tyu".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(9, "yui".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(10, "uio".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(11, "iop".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(12, "op[".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(13, "p[]".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(14, "zxc".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(15, "xcv".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(16, "cvb".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(17, "vbn".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(18, "bnm".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(19, "nm,".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.export_to_sstable(&config, &mut File::create("/tmp/test_sstable.log").unwrap()).unwrap();
     }
 }

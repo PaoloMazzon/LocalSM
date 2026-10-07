@@ -4,9 +4,11 @@ use crate::util::bloomfilter::BloomFilter;
 use crate::util::error::Result;
 
 pub(crate) static SSTABLE_MAGIC_BYTES: [u8; 4] = [255, 92, 54, 92];
+pub(crate) static SSTABLE_ENCODING_VERSION: u32 = 1;
 
-/********************* SSTable binary format *********************/
+/******************** SSTable binary format v1 *******************/
 /* 1. 4 byte header                                              */
+/* 1. 4 version                                                  */
 /* 2. 4 bytes for the size of BloomFilter struct                 */
 /* 3. BloomFilter struct of size previously stated in (2)        */
 /* 4. Size of SparseKeyIdTable                                   */
@@ -19,8 +21,13 @@ pub(crate) static SSTABLE_MAGIC_BYTES: [u8; 4] = [255, 92, 54, 92];
 /// Just an entry's key/id/location in file for SparseKeyIdTable
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct EntryLocation {
+    /// Key for this record
     pub key: String,
-    pub id: i64,
+
+    /// Sort key for this record
+    pub sort_key: i64,
+
+    /// How many bytes into the file from the top of the header this record is
     pub location: u64,
 }
 
@@ -29,7 +36,7 @@ pub(crate) struct EntryLocation {
 /// ballpark quickly.
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct SparseKeyIdTable {
-    key_ids: Vec<EntryLocation>,
+    pub key_ids: Vec<EntryLocation>,
 }
 
 /// Returns true if a table contains a given key/id pair
