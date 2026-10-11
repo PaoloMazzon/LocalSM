@@ -288,4 +288,35 @@ mod tests {
         mt.add(19, "nm,".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
         mt.export_to_sstable(&config, &mut File::create("/tmp/test_sstable.log").unwrap()).unwrap();
     }
+
+    #[test]
+    fn test_sparse_lookup() {
+        let mut mt = MemTable::new("/tmp/asdkjakdjak.log".to_string()).unwrap();
+        let config = Config {
+            sparse_table_record_count: 3,
+            entries_per_sstable: 9,
+            ..Default::default()
+        };
+        mt.add(1, "1".to_string(), vec![0, 1]).unwrap();
+        mt.add(8, "2".to_string(), vec![0, 1]).unwrap();
+        mt.add(1, "3".to_string(), vec![0, 1]).unwrap();
+        mt.add(1, "4".to_string(), vec![0, 1]).unwrap();
+        mt.add(3, "4".to_string(), vec![0, 1]).unwrap();
+        mt.add(1, "6".to_string(), vec![0, 1]).unwrap();
+        mt.add(1, "6".to_string(), vec![2, 3]).unwrap();
+        mt.add(9, "8".to_string(), vec![0, 1]).unwrap();
+        mt.add(1, "9".to_string(), vec![0, 1]).unwrap();
+        let sparse_table = mt.create_sparse_table(&config).unwrap();
+        assert_eq!(sparse_table.len(), 3, "Sprase table was generated wrong.");
+        println!("{:#?}", sparse_table);
+        assert_eq!(sparse_table.start_search_from("1".to_string()).unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from("2".to_string()).unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from("3".to_string()).unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from("4".to_string()).unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from("4".to_string()).unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from("6".to_string()).unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from("6".to_string()).unwrap(), sparse_table.key_ids[2].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from("8".to_string()).unwrap(), sparse_table.key_ids[2].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from("9".to_string()).unwrap(), sparse_table.key_ids[2].location, "Sparse table key was in the wrong location.");
+    }
 }

@@ -39,6 +39,31 @@ pub(crate) struct SparseKeyIdTable {
     pub key_ids: Vec<EntryLocation>,
 }
 
+impl SparseKeyIdTable {
+    /// Given a key, tells you a place to start looking for the exact key from, since
+    /// the sparse table is sorted. The returned location is in byte offset from the
+    /// end of the SSTable header.
+    pub fn start_search_from(&self, key: String) -> Option<u64> {
+        if self.len() == 0 {
+            return None
+        }
+        let mut last_location = 0;
+        // TODO: Replace with a binary search later. Doesn't matter for small N's (less than 100)
+        for record in &self.key_ids[1..] {
+            if key > record.key || key == record.key {
+                return Some(last_location)
+            }
+            last_location = record.location;
+        }
+        Some(last_location)
+    }
+
+    /// Returns the number of entries in the sparse key-id table
+    pub fn len(&self) -> usize {
+        self.key_ids.len()
+    }
+}
+
 /// Helps you navigate SSTables more easily
 pub(crate) struct SsTableLoader<R: BufRead> {
     pub bloom_filter: BloomFilter,
@@ -138,5 +163,11 @@ mod tests {
         assert_eq!(loader.bloom_filter.maybe_in_filter("cvb"), true, "cvb was not found in the bloom filter! File parsing probably went wrong.");
         assert_eq!(loader.bloom_filter.maybe_in_filter("vbn"), true, "vbn was not found in the bloom filter! File parsing probably went wrong.");
         assert_eq!(loader.bloom_filter.maybe_in_filter("bnm"), true, "bnm was not found in the bloom filter! File parsing probably went wrong.");
+        assert_eq!(loader.bloom_filter.maybe_in_filter("asd"), true, "asd was not found in the bloom filter! File parsing probably went wrong.");
+        assert_eq!(loader.bloom_filter.maybe_in_filter("fgh"), true, "fgh was not found in the bloom filter! File parsing probably went wrong.");
+        assert_eq!(loader.bloom_filter.maybe_in_filter("hjk"), true, "hjk was not found in the bloom filter! File parsing probably went wrong.");
+        assert_eq!(loader.sparse_key_id_table.len(), 4, "Sparse table was not serialized/deserialzed properly.");
     }
+
+    
 }
