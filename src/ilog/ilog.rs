@@ -193,8 +193,8 @@ impl MemTable {
         let bloom_filter = postcard::to_allocvec(&self.create_bloom_filter(config))?;
         let sparse_table = postcard::to_allocvec(&self.create_sparse_table(config)?)?;
         dest.write_all((bloom_filter.len() as u32).to_le_bytes().as_slice())?;
-        dest.write_all((sparse_table.len() as u32).to_le_bytes().as_slice())?;
         dest.write_all(&bloom_filter)?;
+        dest.write_all((sparse_table.len() as u32).to_le_bytes().as_slice())?;
         dest.write_all(&sparse_table)?;
 
         // Iterate over all records and encode those too
