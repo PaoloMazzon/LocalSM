@@ -1,4 +1,3 @@
-use std::ops::Div;
 use serde::{Deserialize, Serialize};
 
 static BIT_COUNT: usize = 8;

@@ -23,7 +23,7 @@ pub struct Config {
     /// Directory where system-files like temporary cache and settings are stored
     pub system_directory: String,
     
-    /// Additional directories where SSTables may be stored to, if empty only system_directory is used
+    /// Directories where SSTables may be stored to, if empty system_directory is used
     pub data_directory: Vec<String>,
 }
 
@@ -32,7 +32,7 @@ impl Default for Config {
     fn default() -> Self {
         let base_thread_count = match std::thread::available_parallelism() {
             Ok(t) => t.get(),
-            Err(e) => 1,
+            Err(_) => 1,
         };
         Config {
             bloom_filter_bits: 1000,

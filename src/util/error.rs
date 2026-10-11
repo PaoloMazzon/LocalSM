@@ -13,6 +13,9 @@ pub enum LsmError {
     
     /// An entry was requested but none was found matching it
     EntryNotPresent,
+
+    /// SSTable was invalid for some reason
+    InvalidStringTable(String),
     
     /// We don't know what happened, mainly for debugging/development
     Unknown(String),
@@ -20,18 +23,18 @@ pub enum LsmError {
 
 impl From<std::io::Error> for LsmError {
     fn from(e: std::io::Error) -> Self {
-        LsmError::FileNotAvailable(format!("{:?}", e))
+        LsmError::FileNotAvailable(e.to_string())
     }
 }
 
 impl From<serde_json::Error> for LsmError {
     fn from(e: serde_json::Error) -> Self {
-        LsmError::JsonEncodingError(format!("{:?}", e))
+        LsmError::JsonEncodingError(e.to_string())
     }
 }
 
-impl From<serde_binary::Error> for LsmError {
-    fn from(e: serde_binary::Error) -> Self {
-        LsmError::BinaryEncodingError(format!("{:?}", e))
+impl From<postcard::Error> for LsmError {
+    fn from(e: postcard::Error) -> Self {
+        LsmError::BinaryEncodingError(e.to_string())
     }
 }

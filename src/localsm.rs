@@ -1,3 +1,5 @@
+#![feature(read_le)]
+#![cfg_attr(test, allow(unused))]
 extern crate core;
 
 use spdlog::prelude::*;

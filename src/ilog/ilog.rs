@@ -1,9 +1,8 @@
 use std::cmp::Ordering;
-use std::fs::{read, File, OpenOptions};
+use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use serde::{Deserialize, Serialize};
-use serde_binary::binary_stream::Endian;
 use spdlog::prelude::*;
 use crate::ilog::sstable::{EntryLocation, SparseKeyIdTable, SSTABLE_ENCODING_VERSION, SSTABLE_MAGIC_BYTES};
 use crate::util::bloomfilter::BloomFilter;
@@ -178,7 +177,7 @@ impl MemTable {
 
             // Just add the size of this record
             total_size += 4;
-            total_size += serde_binary::to_vec(record, Endian::Little)?.len() as u64;
+            total_size += postcard::to_allocvec(record)?.len() as u64;
             counter += 1;
         }
 
@@ -191,8 +190,8 @@ impl MemTable {
         // Encode the header information, including the bloom filter and sparse table
         dest.write_all(&SSTABLE_MAGIC_BYTES)?;
         dest.write_all(SSTABLE_ENCODING_VERSION.to_le_bytes().as_slice())?;
-        let bloom_filter = serde_binary::to_vec(&self.create_bloom_filter(config), Endian::Little)?;
-        let sparse_table = serde_binary::to_vec(&self.create_sparse_table(config)?, Endian::Little)?;
+        let bloom_filter = postcard::to_allocvec(&self.create_bloom_filter(config))?;
+        let sparse_table = postcard::to_allocvec(&self.create_sparse_table(config)?)?;
         dest.write_all((bloom_filter.len() as u32).to_le_bytes().as_slice())?;
         dest.write_all((sparse_table.len() as u32).to_le_bytes().as_slice())?;
         dest.write_all(&bloom_filter)?;
@@ -200,7 +199,7 @@ impl MemTable {
 
         // Iterate over all records and encode those too
         for record in &self.records {
-            let binary_record = serde_binary::to_vec(record, Endian::Little)?;
+            let binary_record = postcard::to_allocvec(record)?;
             dest.write_all((binary_record.len() as u32).to_le_bytes().as_slice())?;
             dest.write_all(&binary_record)?;
         }

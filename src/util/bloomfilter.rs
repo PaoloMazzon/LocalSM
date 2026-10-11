@@ -1,5 +1,4 @@
-use std::hash::{BuildHasher, Hash, Hasher};
-use rapidhash::fast::SeedableState;
+use std::hash::{Hash, Hasher};
 use rapidhash::v3::{rapidhash_v3_seeded, RapidSecrets};
 use rustc_hash::FxHasher;
 use serde::{Deserialize, Serialize};
