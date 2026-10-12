@@ -41,19 +41,29 @@ pub(crate) struct SparseKeyIdTable {
 }
 
 impl SparseKeyIdTable {
-    ///
+    /// Finds where you should start reverse-walking the items. Note that these tables must be
+    /// walked in reverse because tombstones can appear after their entry meaning you should not
+    /// actually read that value. Will return None if the table is guaranteed to not have the
+    /// item you are looking for any reason, including the table being empty.
     pub fn start_search_from(&self, key: &str) -> Option<u64> {
-        if self.len() == 0 {
+        let last_record = self.key_ids.last()?;
+        let mut last_location = last_record.location;
+        let key_string = key.to_string();
+
+        // The requested record is not within the bounds of this table since sparse tables always
+        // include the first and last element in the SSTable.
+        if key_string > last_record.key || key_string < self.key_ids.first()?.key {
             return None
         }
-        let mut last_location = 0;
-        // TODO: Replace with a binary search later. Doesn't matter for small N's (less than 100)
-        for record in &self.key_ids {
-            if record.key > key || key == record.key {
+
+        // Find where it should be in reverse order
+        for record in self.key_ids.iter().rev() {
+            if key_string >= record.key {
                 return Some(last_location)
             }
             last_location = record.location;
         }
+
         Some(last_location)
     }
 
@@ -128,7 +138,12 @@ impl<R: BufRead> SsTableLoader<R> {
             return None
         }
 
+        todo!("Implement this")
+    }
 
+    /// Walks backwards, finding all entries given a key
+    pub fn get_all(&self, key: &str) -> impl Iterator<Item = ILog> {
+        todo!("Implement this")
     }
 }
 
@@ -145,7 +160,7 @@ mod tests {
         let filename = String::from("/tmp/test_sstable");
         let mut mt = MemTable::new("/tmp/asdkjakdjak.log".to_string()).unwrap();
         let config = Config {
-            sparse_table_record_count: 5,
+            sparse_table_record_frequency: 5,
             entries_per_sstable: 20,
             ..Default::default()
         };

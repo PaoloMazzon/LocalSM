@@ -168,8 +168,8 @@ impl MemTable {
         let mut total_size = 0;
         let mut counter = 0;
         for record in &self.records {
-            // Record this entry
-            if counter % config.sparse_table_record_count == 0 {
+            // Record this entry if its hit the proper interval or this is the last entry
+            if counter % config.sparse_table_record_frequency == 0 || counter as usize == self.records.len() - 1 {
                 table.key_ids.push(EntryLocation {
                     key: record.key.clone(),
                     sort_key: record.sort_key,
@@ -264,30 +264,30 @@ mod tests {
     fn test_serializing_sstable() {
         let mut mt = MemTable::new("/tmp/fake_recover.log".to_string()).unwrap();
         let config = Config {
-            sparse_table_record_count: 5,
+            sparse_table_record_frequency: 5,
             entries_per_sstable: 20,
             ..Default::default()
         };
-        mt.delete(0, "key").unwrap();
+        mt.delete(0, "key").unwrap(); // sstable entry
         mt.add(1, "asd", vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
         mt.add(2, "fgh", vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
         mt.add(3, "hjk", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
         mt.add(4, "qwe", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(5, "wer", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(5, "wer", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap(); // sstable entry
         mt.add(6, "ert", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
         mt.add(7, "rty", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
         mt.add(8, "tyu", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
         mt.add(9, "yui", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(10, "uio", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(10, "uio", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap(); // sstable entry
         mt.add(11, "iop", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
         mt.add(12, "op[", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
         mt.add(13, "p[]", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
         mt.add(14, "zxc", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(15, "xcv", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(15, "xcv", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap(); // sstable entry
         mt.add(16, "cvb", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
         mt.add(17, "vbn", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
         mt.add(18, "bnm", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(19, "nm,", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(19, "nm,", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap(); // sstable entry
         mt.export_to_sstable(&config, &mut File::create("/tmp/test_sstable.log").unwrap()).unwrap();
     }
 
@@ -295,25 +295,25 @@ mod tests {
     fn test_sparse_lookup() {
         let mut mt = MemTable::new("/tmp/asdkjakdjak.log".to_string()).unwrap();
         let config = Config {
-            sparse_table_record_count: 3,
+            sparse_table_record_frequency: 3,
             entries_per_sstable: 9,
             ..Default::default()
         };
-        mt.add(1, "1", vec![0, 1]).unwrap(); // first entry
+        mt.add(1, "1", vec![0, 1]).unwrap(); // zeroth entry
         mt.add(8, "2", vec![0, 1]).unwrap();
         mt.add(1, "3", vec![0, 1]).unwrap();
-        mt.add(1, "4", vec![0, 1]).unwrap(); // second entry
+        mt.add(1, "4", vec![0, 1]).unwrap(); // first entry
         mt.add(3, "4", vec![0, 1]).unwrap();
         mt.add(1, "6", vec![0, 1]).unwrap();
-        mt.add(1, "6", vec![2, 3]).unwrap(); // third entry
+        mt.add(1, "6", vec![2, 3]).unwrap(); // second entry
         mt.add(9, "8", vec![0, 1]).unwrap();
-        mt.add(1, "9", vec![0, 1]).unwrap();
+        mt.add(1, "9", vec![0, 1]).unwrap(); // third entry
         let sparse_table = mt.create_sparse_table(&config).unwrap();
         assert_eq!(sparse_table.len(), 3, "Sprase table was generated wrong.");
-        assert_eq!(sparse_table.start_search_from("1").unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
-        assert_eq!(sparse_table.start_search_from("2").unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
-        assert_eq!(sparse_table.start_search_from("3").unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
-        assert_eq!(sparse_table.start_search_from("4").unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from("1").unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from("2").unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from("3").unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from("4").unwrap(), sparse_table.key_ids[2].location, "Sparse table key was in the wrong location.");
         assert_eq!(sparse_table.start_search_from("6").unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
         assert_eq!(sparse_table.start_search_from("8").unwrap(), sparse_table.key_ids[2].location, "Sparse table key was in the wrong location.");
         assert_eq!(sparse_table.start_search_from("9").unwrap(), sparse_table.key_ids[2].location, "Sparse table key was in the wrong location.");
