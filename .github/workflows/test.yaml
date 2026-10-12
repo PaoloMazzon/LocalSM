@@ -17,6 +17,6 @@ jobs:
       - name: Install Rust Nightly
         uses: dtolnay/rust-toolchain@nightly
         with:
-          components: llvm-cov
+          components: cargo-llvm-cov
       - name: Run unit and integration tests
         run: cargo llvm-cov
