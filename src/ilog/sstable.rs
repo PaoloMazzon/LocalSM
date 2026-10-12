@@ -1,5 +1,6 @@
 use std::io::{BufRead};
 use serde::{Deserialize, Serialize};
+use crate::ilog::ilog::ILog;
 use crate::util::bloomfilter::BloomFilter;
 use crate::util::error::{LsmError, Result};
 
@@ -40,15 +41,8 @@ pub(crate) struct SparseKeyIdTable {
 }
 
 impl SparseKeyIdTable {
-    /// Given a key, tells you a place to start looking for the exact key from, since
-    /// the sparse table is sorted. The returned location is in byte offset from the
-    /// end of the SSTable header.
     ///
-    /// # Note
-    /// If an SSTable entry falls right on the key you're searching for, it will send
-    /// you one location back, as it cannot guarantee if its the right sort_key without
-    /// iterating through.
-    pub fn start_search_from(&self, key: String) -> Option<u64> {
+    pub fn start_search_from(&self, key: &str) -> Option<u64> {
         if self.len() == 0 {
             return None
         }
@@ -116,6 +110,26 @@ impl<R: BufRead> SsTableLoader<R> {
             reader: buffer,
         })
     }
+
+    /// Returns true if a particular key exists on this table
+    pub fn has(&self, key: &str, sort_key: i64) -> bool {
+        self.get(key, sort_key).is_some()
+    }
+
+    /// Tries to get a key from a table, returning None if it is not present. This
+    /// typically involves a bit of file I/O, but some tricks are used to speed this
+    /// up. First, this function will use its in-memory bloom filter to quickly rule
+    /// out keys that aren't present. Past that point it will use a sparse key/id
+    /// (also in-memory) to jump to the part of the file closest to where your potential
+    /// key is located. This is still much heavier than a hash-map or something similar
+    /// but incredibly performant as far as disk lookups go.
+    pub fn get(&self, key: &str, sort_key: i64) -> Option<ILog> {
+        if !self.bloom_filter.maybe_in_filter(key) {
+            return None
+        }
+
+
+    }
 }
 
 #[cfg(test)]
@@ -124,7 +138,7 @@ mod tests {
     use std::io::BufReader;
     use std::path::Path;
     use crate::ilog::ilog::MemTable;
-    use crate::ilog::sstable::SsTableLoader;
+    use crate::ilog::sstable::{EntryLocation, SparseKeyIdTable, SsTableLoader};
     use crate::util::config::Config;
 
     fn create_sstable() -> String {
@@ -135,28 +149,73 @@ mod tests {
             entries_per_sstable: 20,
             ..Default::default()
         };
-        mt.delete(0, "key".to_string()).unwrap();
-        mt.add(1, "asd".to_string(), vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(2, "fgh".to_string(), vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(3, "hjk".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(4, "qwe".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(5, "wer".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(6, "ert".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(7, "rty".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(8, "tyu".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(9, "yui".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(10, "uio".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(11, "iop".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(12, "op[".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(13, "p[]".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(14, "zxc".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(15, "xcv".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(16, "cvb".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(17, "vbn".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(18, "bnm".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(19, "nm,".to_string(), vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.delete(0, "key").unwrap();
+        mt.add(1, "asd", vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(2, "fgh", vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(3, "hjk", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(4, "qwe", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(5, "wer", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(6, "ert", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(7, "rty", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(8, "tyu", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(9, "yui", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(10, "uio", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(11, "iop", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(12, "op[", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(13, "p[]", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(14, "zxc", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(15, "xcv", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(16, "cvb", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(17, "vbn", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(18, "bnm", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add(19, "nm,", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
         mt.export_to_sstable(&config, &mut File::create(filename.as_str()).unwrap()).unwrap();
         filename
+    }
+
+    #[test]
+    fn test_start_search_from() {
+        let table = SparseKeyIdTable {
+            key_ids: vec![
+                EntryLocation {
+                    key: "1".to_string(),
+                    sort_key: 1,
+                    location: 0,
+                },
+                EntryLocation {
+                    key: "4".to_string(),
+                    sort_key: 1,
+                    location: 1,
+                },
+                EntryLocation {
+                    key: "6".to_string(),
+                    sort_key: 1,
+                    location: 2,
+                },
+                EntryLocation {
+                    key: "8".to_string(),
+                    sort_key: 1,
+                    location: 3,
+                },
+                EntryLocation {
+                    key: "8".to_string(),
+                    sort_key: 9,
+                    location: 4,
+                },
+            ],
+        };
+        // Tests for the entries not in the table
+        assert_eq!(table.start_search_from("2").unwrap(), 0, "Failed to find an entry in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from("3").unwrap(), 0, "Failed to find an entry in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from("5").unwrap(), 1, "Failed to find an entry in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from("7").unwrap(), 2, "Failed to find an entry in a SparseKeyIdTable");
+
+        // More targeted/edge case
+        assert_eq!(table.start_search_from("1").unwrap(), 0, "Failed to find the very first entry in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from("4").unwrap(), 0, "Failed to find a specific entry in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from("6").unwrap(), 1, "Failed to find a specific entry in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from("8").unwrap(), 2, "Failed to find a specific entry in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from("9").unwrap(), 4, "Failed to find an entry past the last item in a SparseKeyIdTable");
     }
 
     #[test]
@@ -173,6 +232,4 @@ mod tests {
         assert_eq!(loader.bloom_filter.maybe_in_filter("hjk"), true, "hjk was not found in the bloom filter! File parsing probably went wrong.");
         assert_eq!(loader.sparse_key_id_table.len(), 4, "Sparse table was not serialized/deserialzed properly.");
     }
-
-
 }

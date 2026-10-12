@@ -11,8 +11,8 @@ pub struct Config {
     /// Entries per record stored on disk and in memory
     pub entries_per_sstable: u32,
 
-    /// How many records should be held in sparse key/id tables
-    pub sparse_table_record_count: u32,
+    /// How often should a record in the SSTable appear (one will always appear for the first and last element)
+    pub sparse_table_record_frequency: u32,
 
     /// Background worker threads, must be at least 1
     pub worker_threads: u32,
@@ -38,7 +38,7 @@ impl Default for Config {
             bloom_filter_bits: 1000,
             bloom_filter_hashes: 3,
             entries_per_sstable: 100,
-            sparse_table_record_count: 10,
+            sparse_table_record_frequency: 10,
             worker_threads: base_thread_count as u32,
             record_allowable_size: 1024 * 1024 * 10,
             system_directory: "/var/localsm/".to_string(),
