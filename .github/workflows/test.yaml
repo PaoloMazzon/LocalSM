@@ -14,9 +14,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
-      - name: Install Rust Nightly
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: cargo-llvm-cov
+      - uses: dtolnay/rust-toolchain@nightly
       - name: Run unit and integration tests
-        run: cargo llvm-cov
+        run: |
+              cargo install cargo-llvm-cov
+              cargo llvm-cov
