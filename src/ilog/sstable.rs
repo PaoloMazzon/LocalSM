@@ -43,14 +43,19 @@ impl SparseKeyIdTable {
     /// Given a key, tells you a place to start looking for the exact key from, since
     /// the sparse table is sorted. The returned location is in byte offset from the
     /// end of the SSTable header.
+    ///
+    /// # Note
+    /// If an SSTable entry falls right on the key you're searching for, it will send
+    /// you one location back, as it cannot guarantee if its the right sort_key without
+    /// iterating through.
     pub fn start_search_from(&self, key: String) -> Option<u64> {
         if self.len() == 0 {
             return None
         }
         let mut last_location = 0;
         // TODO: Replace with a binary search later. Doesn't matter for small N's (less than 100)
-        for record in &self.key_ids[1..] {
-            if key > record.key || key == record.key {
+        for record in &self.key_ids {
+            if record.key > key || key == record.key {
                 return Some(last_location)
             }
             last_location = record.location;
@@ -169,5 +174,5 @@ mod tests {
         assert_eq!(loader.sparse_key_id_table.len(), 4, "Sparse table was not serialized/deserialzed properly.");
     }
 
-    
+
 }
