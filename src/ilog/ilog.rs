@@ -87,7 +87,7 @@ impl MemTable {
 
     /// Adds a new record to the in-memory map and the crash-recovery file.
     /// This does not assign unique sort_keys as those must be acquired elsewhere.
-    pub fn add(&mut self, sort_key: i64, key: &str, val: Vec<u8>) -> Result<()> {
+    pub fn add(&mut self, key: &str, sort_key: i64, val: Vec<u8>) -> Result<()> {
         let log = ILog {
             key: key.to_string(),
             sort_key,
@@ -101,7 +101,7 @@ impl MemTable {
     }
 
     /// Deletes a record
-    pub fn delete(&mut self, sort_key: i64, key: &str) -> Result<()> {
+    pub fn delete(&mut self, key: &str, sort_key: i64) -> Result<()> {
         let log = ILog {
             key: key.to_string(),
             sort_key,
@@ -115,7 +115,7 @@ impl MemTable {
     }
 
     /// Returns true if a key exists in this MemTable (and isn't a tombstone)
-    pub fn has(&self, sort_key: i64, key: &str) -> bool {
+    pub fn has(&self, key: &str, sort_key: i64) -> bool {
         match self.records.iter().rfind(|log| log.key == key && log.sort_key == sort_key) {
             Some(x) => !x.tombstone,
             None => false
@@ -123,7 +123,7 @@ impl MemTable {
     }
 
     /// Returns a requested log from a MemTable or None if it isn't present
-    pub fn get(&self, sort_key: i64, key: &str) -> Option<&ILog> {
+    pub fn get(&self, key: &str, sort_key: i64) -> Option<&ILog> {
         match self.records.iter().rfind(|log| log.key == key && log.sort_key == sort_key) {
             Some(x) => match x.tombstone {
                 false => Some(x),
@@ -157,8 +157,22 @@ impl MemTable {
             } else if x.sort_key > y.sort_key {
                 return Ordering::Greater
             }
+            let timestamp_x = match chrono::DateTime::parse_from_rfc3339(x.timestamp.as_str()) {
+                Ok(t) => t,
+                Err(_) => return Ordering::Equal,
+            };
+            let timestamp_y = match chrono::DateTime::parse_from_rfc3339(y.timestamp.as_str()) {
+                Ok(t) => t,
+                Err(_) => return Ordering::Equal,
+            };
+            if timestamp_x < timestamp_y {
+                return Ordering::Less
+            } else if timestamp_x > timestamp_y {
+                return Ordering::Greater
+            }
             Ordering::Equal
         });
+        self.records.reverse();
 
         let mut table = SparseKeyIdTable {
             key_ids: Vec::new()
@@ -225,39 +239,39 @@ mod tests {
     #[test]
     fn test_get_set_remove() {
         let mut mt = MemTable::new("/tmp/test.log".to_string()).unwrap();
-        assert!(!mt.has(10, "key"), "\"has\" is detecting a non-existant record.");
-        mt.add(10, "key", vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        assert!(mt.has(10, "key"), "Adding or \"has\" isn't working.");
-        mt.delete(10, "key").unwrap();
-        assert!(!mt.has(10, "key"), "Deleting records didn't work.");
+        assert!(!mt.has("key", 10), "\"has\" is detecting a non-existant record.");
+        mt.add("key", 10, vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        assert!(mt.has("key", 10), "Adding or \"has\" isn't working.");
+        mt.delete("key", 10).unwrap();
+        assert!(!mt.has("key", 10), "Deleting records didn't work.");
     }
 
     #[test]
     fn test_add_many() {
         let mut mt = MemTable::new("/tmp/test.log2".to_string()).unwrap();
-        mt.add(10, "key", vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(11, "key", vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(12, "key", vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(10, "key2", vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(11, "key2", vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(12, "key2", vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(100, "key3", vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("key", 10, vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("key", 11, vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("key", 12, vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("key2", 10, vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("key2", 11, vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("key2", 12, vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("key3", 100, vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
     }
 
     #[test]
     fn test_recovery() {
         let mut mt = MemTable::new("/tmp/recover.log".to_string()).unwrap();
-        mt.add(10, "key", vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.delete(10, "key").unwrap();
-        mt.add(11, "key", vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(12, "key", vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(20, "test", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("key", 10, vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.delete("key", 10).unwrap();
+        mt.add("key", 11, vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("key", 12, vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("test", 20, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
 
         let loaded_table = MemTable::recover("/tmp/recover.log").unwrap();
-        assert!(!loaded_table.has(10, "key"), "Tombstone was not loaded properly.");
-        assert!(loaded_table.has(11, "key"), "Value was not loaded properly.");
-        assert!(loaded_table.has(12, "key"), "Value was not loaded properly.");
-        assert_eq!(loaded_table.get(20, "test").unwrap().value, vec![1, 1, 2, 3, 4, 5, 6, 7], "Value was not loaded or parsed properly.");
+        assert!(!loaded_table.has("key", 10), "Tombstone was not loaded properly.");
+        assert!(loaded_table.has("key", 11), "Value was not loaded properly.");
+        assert!(loaded_table.has("key", 12), "Value was not loaded properly.");
+        assert_eq!(loaded_table.get("test", 20).unwrap().value, vec![1, 1, 2, 3, 4, 5, 6, 7], "Value was not loaded or parsed properly.");
     }
 
     #[test]
@@ -268,26 +282,26 @@ mod tests {
             entries_per_sstable: 20,
             ..Default::default()
         };
-        mt.delete(0, "key").unwrap(); // sstable entry
-        mt.add(1, "asd", vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(2, "fgh", vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(3, "hjk", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(4, "qwe", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(5, "wer", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap(); // sstable entry
-        mt.add(6, "ert", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(7, "rty", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(8, "tyu", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(9, "yui", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(10, "uio", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap(); // sstable entry
-        mt.add(11, "iop", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(12, "op[", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(13, "p[]", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(14, "zxc", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(15, "xcv", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap(); // sstable entry
-        mt.add(16, "cvb", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(17, "vbn", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(18, "bnm", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(19, "nm,", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap(); // sstable entry
+        mt.delete("key", 0).unwrap(); // sstable entry
+        mt.add("asd", 1, vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("fgh", 2, vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("hjk", 3, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("qwe", 4, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("wer", 5, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap(); // sstable entry
+        mt.add("ert", 6, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("rty", 7, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("tyu", 8, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("yui", 9, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("uio", 10, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap(); // sstable entry
+        mt.add("iop", 11, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("op[", 12, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("p[]", 13, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("zxc", 14, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("xcv", 15, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap(); // sstable entry
+        mt.add("cvb", 16, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("vbn", 17, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("bnm", 18, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("nm,", 19, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap(); // sstable entry
         mt.export_to_sstable(&config, &mut File::create("/tmp/test_sstable.log").unwrap()).unwrap();
     }
 
@@ -299,23 +313,23 @@ mod tests {
             entries_per_sstable: 9,
             ..Default::default()
         };
-        mt.add(1, "1", vec![0, 1]).unwrap(); // zeroth entry
-        mt.add(8, "2", vec![0, 1]).unwrap();
-        mt.add(1, "3", vec![0, 1]).unwrap();
-        mt.add(1, "4", vec![0, 1]).unwrap(); // first entry
-        mt.add(3, "4", vec![0, 1]).unwrap();
-        mt.add(1, "6", vec![0, 1]).unwrap();
-        mt.add(1, "6", vec![2, 3]).unwrap(); // second entry
-        mt.add(9, "8", vec![0, 1]).unwrap();
-        mt.add(1, "9", vec![0, 1]).unwrap(); // third entry
+        mt.add("1", 1, vec![0, 1]).unwrap(); // third entry
+        mt.add("2", 8, vec![0, 1]).unwrap();
+        mt.add("3", 1, vec![0, 1]).unwrap(); // second entry
+        mt.add("4", 1, vec![0, 1]).unwrap();
+        mt.add("4", 3, vec![0, 1]).unwrap();
+        mt.add("6", 1, vec![0, 1]).unwrap(); // first entry
+        mt.add("6", 1, vec![2, 3]).unwrap();
+        mt.add("8", 9, vec![0, 1]).unwrap();
+        mt.add("9", 1, vec![0, 1]).unwrap(); // zeroth entry
         let sparse_table = mt.create_sparse_table(&config).unwrap();
-        assert_eq!(sparse_table.len(), 3, "Sprase table was generated wrong.");
-        assert_eq!(sparse_table.start_search_from("1").unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
-        assert_eq!(sparse_table.start_search_from("2").unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.len(), 4, "Sprase table was generated wrong.");
+        assert_eq!(sparse_table.start_search_from("1").unwrap(), sparse_table.key_ids[2].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from("2").unwrap(), sparse_table.key_ids[2].location, "Sparse table key was in the wrong location.");
         assert_eq!(sparse_table.start_search_from("3").unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
-        assert_eq!(sparse_table.start_search_from("4").unwrap(), sparse_table.key_ids[2].location, "Sparse table key was in the wrong location.");
-        assert_eq!(sparse_table.start_search_from("6").unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
-        assert_eq!(sparse_table.start_search_from("8").unwrap(), sparse_table.key_ids[2].location, "Sparse table key was in the wrong location.");
-        assert_eq!(sparse_table.start_search_from("9").unwrap(), sparse_table.key_ids[2].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from("4").unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from("6").unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from("8").unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from("9").unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
     }
 }

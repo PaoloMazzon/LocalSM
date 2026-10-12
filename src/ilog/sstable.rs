@@ -1,4 +1,4 @@
-use std::io::{BufRead};
+use std::io::{BufRead, Seek};
 use serde::{Deserialize, Serialize};
 use crate::ilog::ilog::ILog;
 use crate::util::bloomfilter::BloomFilter;
@@ -41,30 +41,28 @@ pub(crate) struct SparseKeyIdTable {
 }
 
 impl SparseKeyIdTable {
-    /// Finds where you should start reverse-walking the items. Note that these tables must be
-    /// walked in reverse because tombstones can appear after their entry meaning you should not
-    /// actually read that value. Will return None if the table is guaranteed to not have the
-    /// item you are looking for any reason, including the table being empty.
+    /// Finds where you should start walking the file. SSTables are sorted in descending order,
+    /// such that you find the highest and newest keys first then the older/smaller keys after. This
+    /// is so you can find tombstones first.
     pub fn start_search_from(&self, key: &str) -> Option<u64> {
-        let last_record = self.key_ids.last()?;
-        let mut last_location = last_record.location;
+        let mut previous_location = 0;
         let key_string = key.to_string();
 
         // The requested record is not within the bounds of this table since sparse tables always
         // include the first and last element in the SSTable.
-        if key_string > last_record.key || key_string < self.key_ids.first()?.key {
+        if key_string < self.key_ids.last()?.key || key_string > self.key_ids.first()?.key {
             return None
         }
 
         // Find where it should be in reverse order
-        for record in self.key_ids.iter().rev() {
+        for record in &self.key_ids {
             if key_string >= record.key {
-                return Some(last_location)
+                return Some(previous_location)
             }
-            last_location = record.location;
+            previous_location = record.location;
         }
 
-        Some(last_location)
+        Some(previous_location)
     }
 
     /// Returns the number of entries in the sparse key-id table
@@ -74,13 +72,13 @@ impl SparseKeyIdTable {
 }
 
 /// Helps you navigate SSTables more easily
-pub(crate) struct SsTableLoader<R: BufRead> {
+pub(crate) struct SsTableLoader<R: BufRead + Seek> {
     pub bloom_filter: BloomFilter,
     pub sparse_key_id_table: SparseKeyIdTable,
     reader: R,
 }
 
-impl<R: BufRead> SsTableLoader<R> {
+impl<R: BufRead + Seek> SsTableLoader<R> {
     /// Loads the header out of an SsTable
     pub fn load(mut buffer: R) -> Result<Self> {
         // Validate magic bytes
@@ -137,13 +135,14 @@ impl<R: BufRead> SsTableLoader<R> {
         if !self.bloom_filter.maybe_in_filter(key) {
             return None
         }
+        let start_location = self.sparse_key_id_table.start_search_from(key)?;
 
-        todo!("Implement this")
+        todo!()
     }
 
-    /// Walks backwards, finding all entries given a key
-    pub fn get_all(&self, key: &str) -> impl Iterator<Item = ILog> {
-        todo!("Implement this")
+    /// Collects all entries with a given key from a map
+    pub fn get_all(&self, key: &str) -> Vec<&ILog> {
+        todo!()
     }
 }
 
@@ -164,26 +163,26 @@ mod tests {
             entries_per_sstable: 20,
             ..Default::default()
         };
-        mt.delete(0, "key").unwrap();
-        mt.add(1, "asd", vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(2, "fgh", vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(3, "hjk", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(4, "qwe", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(5, "wer", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(6, "ert", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(7, "rty", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(8, "tyu", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(9, "yui", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(10, "uio", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(11, "iop", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(12, "op[", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(13, "p[]", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(14, "zxc", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(15, "xcv", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(16, "cvb", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(17, "vbn", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(18, "bnm", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add(19, "nm,", vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.delete("key", 0).unwrap(); // 4
+        mt.add("asd", 1, vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("fgh", 2, vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("hjk", 3, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("qwe", 4, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("wer", 5, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap(); // 3
+        mt.add("ert", 6, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("rty", 7, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("tyu", 8, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("yui", 9, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("uio", 10, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap(); // 2
+        mt.add("iop", 11, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("op[", 12, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("p[]", 13, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("zxc", 14, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("xcv", 15, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap(); // 1
+        mt.add("cvb", 16, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("vbn", 17, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("bnm", 18, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
+        mt.add("nm,", 19, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap(); // 0
         mt.export_to_sstable(&config, &mut File::create(filename.as_str()).unwrap()).unwrap();
         filename
     }
@@ -193,12 +192,12 @@ mod tests {
         let table = SparseKeyIdTable {
             key_ids: vec![
                 EntryLocation {
-                    key: "1".to_string(),
-                    sort_key: 1,
+                    key: "8".to_string(),
+                    sort_key: 9,
                     location: 0,
                 },
                 EntryLocation {
-                    key: "4".to_string(),
+                    key: "8".to_string(),
                     sort_key: 1,
                     location: 1,
                 },
@@ -208,29 +207,30 @@ mod tests {
                     location: 2,
                 },
                 EntryLocation {
-                    key: "8".to_string(),
+                    key: "4".to_string(),
                     sort_key: 1,
                     location: 3,
                 },
                 EntryLocation {
-                    key: "8".to_string(),
-                    sort_key: 9,
+                    key: "1".to_string(),
+                    sort_key: 1,
                     location: 4,
                 },
             ],
         };
         // Tests for the entries not in the table
-        assert_eq!(table.start_search_from("2").unwrap(), 0, "Failed to find an entry in a SparseKeyIdTable");
-        assert_eq!(table.start_search_from("3").unwrap(), 0, "Failed to find an entry in a SparseKeyIdTable");
-        assert_eq!(table.start_search_from("5").unwrap(), 1, "Failed to find an entry in a SparseKeyIdTable");
-        assert_eq!(table.start_search_from("7").unwrap(), 2, "Failed to find an entry in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from("2").unwrap(), 3, "Failed to find an entry in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from("3").unwrap(), 3, "Failed to find an entry in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from("5").unwrap(), 2, "Failed to find an entry in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from("7").unwrap(), 1, "Failed to find an entry in a SparseKeyIdTable");
 
         // More targeted/edge case
-        assert_eq!(table.start_search_from("1").unwrap(), 0, "Failed to find the very first entry in a SparseKeyIdTable");
-        assert_eq!(table.start_search_from("4").unwrap(), 0, "Failed to find a specific entry in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from("1").unwrap(), 3, "Failed to find the very first entry in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from("4").unwrap(), 2, "Failed to find a specific entry in a SparseKeyIdTable");
         assert_eq!(table.start_search_from("6").unwrap(), 1, "Failed to find a specific entry in a SparseKeyIdTable");
-        assert_eq!(table.start_search_from("8").unwrap(), 2, "Failed to find a specific entry in a SparseKeyIdTable");
-        assert_eq!(table.start_search_from("9").unwrap(), 4, "Failed to find an entry past the last item in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from("8").unwrap(), 0, "Failed to find a specific entry in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from("9"), None, "Found an entry where there should not have been one in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from("0"), None, "Found an entry where there should not have been one in a SparseKeyIdTable");
     }
 
     #[test]
@@ -245,6 +245,6 @@ mod tests {
         assert_eq!(loader.bloom_filter.maybe_in_filter("asd"), true, "asd was not found in the bloom filter! File parsing probably went wrong.");
         assert_eq!(loader.bloom_filter.maybe_in_filter("fgh"), true, "fgh was not found in the bloom filter! File parsing probably went wrong.");
         assert_eq!(loader.bloom_filter.maybe_in_filter("hjk"), true, "hjk was not found in the bloom filter! File parsing probably went wrong.");
-        assert_eq!(loader.sparse_key_id_table.len(), 4, "Sparse table was not serialized/deserialzed properly.");
+        assert_eq!(loader.sparse_key_id_table.len(), 5, "Sparse table was not serialized/deserialzed properly.");
     }
 }
