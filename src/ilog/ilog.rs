@@ -10,7 +10,7 @@ use crate::util::config::Config;
 use crate::util::error::Result;
 use crate::util::time::get_iso_time;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, PartialOrd)]
 pub(crate) struct ILog {
     /// String key for this one
     key: String,
@@ -26,6 +26,35 @@ pub(crate) struct ILog {
 
     /// If this is a deletion record
     tombstone: bool,
+}
+
+impl Ord for ILog {
+    fn cmp(&self, other: &Self) -> Ordering {
+        if self.key < other.key {
+            return Ordering::Less
+        } else if self.key > other.key {
+            return Ordering::Greater
+        }
+        if self.sort_key < other.sort_key {
+            return Ordering::Less
+        } else if self.sort_key > other.sort_key {
+            return Ordering::Greater
+        }
+        let timestamp_x = match chrono::DateTime::parse_from_rfc3339(self.timestamp.as_str()) {
+            Ok(t) => t,
+            Err(_) => return Ordering::Equal,
+        };
+        let timestamp_y = match chrono::DateTime::parse_from_rfc3339(other.timestamp.as_str()) {
+            Ok(t) => t,
+            Err(_) => return Ordering::Equal,
+        };
+        if timestamp_x < timestamp_y {
+            return Ordering::Less
+        } else if timestamp_x > timestamp_y {
+            return Ordering::Greater
+        }
+        Ordering::Equal
+    }
 }
 
 /// In-memory i-logs
@@ -146,32 +175,7 @@ impl MemTable {
     /// as it needs to sort the entire records list and binary encode every member to get its
     /// size for the entries sparse lookup table.
     fn create_sparse_table(&mut self, config: &Config) -> Result<SparseKeyIdTable> {
-        self.records.sort_unstable_by(|x, y| {
-            if x.key < y.key {
-                return Ordering::Less
-            } else if x.key > y.key {
-                return Ordering::Greater
-            }
-            if x.sort_key < y.sort_key {
-                return Ordering::Less
-            } else if x.sort_key > y.sort_key {
-                return Ordering::Greater
-            }
-            let timestamp_x = match chrono::DateTime::parse_from_rfc3339(x.timestamp.as_str()) {
-                Ok(t) => t,
-                Err(_) => return Ordering::Equal,
-            };
-            let timestamp_y = match chrono::DateTime::parse_from_rfc3339(y.timestamp.as_str()) {
-                Ok(t) => t,
-                Err(_) => return Ordering::Equal,
-            };
-            if timestamp_x < timestamp_y {
-                return Ordering::Less
-            } else if timestamp_x > timestamp_y {
-                return Ordering::Greater
-            }
-            Ordering::Equal
-        });
+        self.records.sort_unstable();
         self.records.reverse();
 
         let mut table = SparseKeyIdTable {
@@ -323,7 +327,7 @@ mod tests {
         mt.add("8", 9, vec![0, 1]).unwrap();
         mt.add("9", 1, vec![0, 1]).unwrap(); // zeroth entry
         let sparse_table = mt.create_sparse_table(&config).unwrap();
-        assert_eq!(sparse_table.len(), 4, "Sprase table was generated wrong.");
+        assert_eq!(sparse_table.len(), 4, "Sparse table was generated wrong.");
         assert_eq!(sparse_table.start_search_from("1").unwrap(), sparse_table.key_ids[2].location, "Sparse table key was in the wrong location.");
         assert_eq!(sparse_table.start_search_from("2").unwrap(), sparse_table.key_ids[2].location, "Sparse table key was in the wrong location.");
         assert_eq!(sparse_table.start_search_from("3").unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");

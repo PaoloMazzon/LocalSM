@@ -449,7 +449,7 @@ mod tests {
 
     #[test]
     fn test_present_in_filter() {
-        let mut filter = BloomFilter::init(1024, 3);
+        let mut filter = BloomFilter::init(2048, 7);
         for s in get_good_string() {
             filter.add(s.as_str());
         }
