@@ -16,9 +16,33 @@ pub enum LsmError {
 
     /// SSTable was invalid for some reason
     InvalidStringTable(String),
+
+    /// An error with compression or decompression
+    CompressionError(String),
     
     /// We don't know what happened, mainly for debugging/development
     Unknown(String),
+}
+
+impl ToString for LsmError {
+    fn to_string(&self) -> String {
+        match self {
+            LsmError::BinaryEncodingError(e)
+                => format!("Binary encoding error: {}", e),
+            LsmError::JsonEncodingError(e)
+                => format!("JSON encoding error: {}", e),
+            LsmError::FileNotAvailable(e)
+                => format!("Filesystem error: {}", e),
+            LsmError::EntryNotPresent
+                => "Entry not present".to_string(),
+            LsmError::InvalidStringTable(e)
+                => format!("Invalid string table: {}", e),
+            LsmError::CompressionError(e)
+                => format!("Compression/Decompression error: {}", e),
+            LsmError::Unknown(e)
+                => format!("Unknown error: {}", e),
+        }
+    }
 }
 
 impl From<std::io::Error> for LsmError {
@@ -35,6 +59,12 @@ impl From<serde_json::Error> for LsmError {
 
 impl From<postcard::Error> for LsmError {
     fn from(e: postcard::Error) -> Self {
+        LsmError::BinaryEncodingError(e.to_string())
+    }
+}
+
+impl From<zstd_rs::Error> for LsmError {
+    fn from(e: zstd_rs::Error) -> Self {
         LsmError::BinaryEncodingError(e.to_string())
     }
 }

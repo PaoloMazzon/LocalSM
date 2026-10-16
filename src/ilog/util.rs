@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
+use zstd_rs::{CompressionConfig, Compressor, Decompressor};
+use crate::ilog::ilog::ILog;
 use crate::ilog::sstable::EntryLocation;
+use crate::util::error::Result;
 
 /// Contains a (sorted) list of key/id pairs and their locations in the file.
 /// This does not contain all the keys, but can be used to get to right
@@ -40,10 +43,48 @@ impl SparseKeyIdTable {
     }
 }
 
+/// Helps manage compressing and loading blocks in the SSTable
+#[derive(Serialize, Deserialize, Debug)]
+pub(crate) struct CompressionBlock {
+    pub logs: Vec<ILog>
+}
+
+impl CompressionBlock {
+    /// Creates an empty compression block for you to fill in
+    pub fn new() -> Self {
+        Self {
+            logs: Vec::new()
+        }
+    }
+
+    /// Attempts to decompress a block and return it
+    pub fn decompress(bytes: &[u8]) -> Result<Self> {
+        let mut decompressed = Vec::new();
+        Decompressor::new().decompress(bytes, None, 1 << 20, &mut decompressed)?;
+        Ok(postcard::from_bytes(decompressed.as_slice())?)
+    }
+
+    /// Adds an ilog to the internal block. This is expected to already be sorted.
+    pub fn add_to_block(&mut self, log: ILog) {
+        self.logs.push(log);
+    }
+
+    /// Compresses a block and returns its form as a u8 vector
+    pub fn compress(&self) -> Result<Vec<u8>> {
+        let serial = postcard::to_allocvec(self)?;
+        let mut compressed = Vec::new();
+        Compressor::new(CompressionConfig::DEFAULT)?
+            .compress(serial.as_slice(), None, &mut compressed)?;
+        Ok(compressed)
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::iter::zip;
+    use crate::ilog::ilog::ILog;
     use crate::ilog::sstable::EntryLocation;
-    use crate::ilog::util::SparseKeyIdTable;
+    use crate::ilog::util::{CompressionBlock, SparseKeyIdTable};
 
     #[test]
     fn test_start_search_from() {
@@ -89,5 +130,43 @@ mod tests {
         assert_eq!(table.start_search_from("8").unwrap(), 0, "Failed to find a specific entry in a SparseKeyIdTable");
         assert_eq!(table.start_search_from("9"), None, "Found an entry where there should not have been one in a SparseKeyIdTable");
         assert_eq!(table.start_search_from("0"), None, "Found an entry where there should not have been one in a SparseKeyIdTable");
+    }
+
+    #[test]
+    fn test_compression_block_compression_and_decompression() {
+        let mut block = CompressionBlock::new();
+        let source_of_truth = vec![
+            ILog {
+                key: "asd".to_string(),
+                sort_key: 0,
+                value: vec![1, 2, 3],
+                timestamp: "".to_string(),
+                tombstone: false,
+            },
+            ILog {
+                key: "sdf".to_string(),
+                sort_key: 1,
+                value: vec![2, 3, 4],
+                timestamp: "".to_string(),
+                tombstone: false,
+            },
+            ILog {
+                key: "dfg".to_string(),
+                sort_key: 2,
+                value: vec![3, 4, 5],
+                timestamp: "".to_string(),
+                tombstone: false,
+            },
+        ];
+
+        for log in &source_of_truth {
+            block.add_to_block(log.clone());
+        }
+        let compressed = block.compress().expect("Compression failed");
+        let decompressed_block = CompressionBlock::decompress(compressed.as_slice()).expect("Decompression failed");
+        assert_eq!(block.logs.len(), decompressed_block.logs.len(), "Different lengths were found in the original and decompressed block.");
+        for (element1, element2) in zip(decompressed_block.logs.iter(), block.logs.iter()) {
+            assert_eq!(element1, element2, "At least 1 element from the compressed and decompressed block didn't match. \n{:#?}\nvs{:#?}", element1, element2);
+        }
     }
 }
