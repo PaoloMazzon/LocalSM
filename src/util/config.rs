@@ -8,11 +8,11 @@ pub struct Config {
     /// Number of hashes to use in the bloom filter, must be at least 2, 3-10 usually
     pub bloom_filter_hashes: u32,
 
-    /// Entries per record stored on disk and in memory
-    pub entries_per_sstable: u32,
+    /// General ball-park for how large (in bytes) compression blocks should be (before compression)
+    pub size_of_compression_blocks: u32,
 
-    /// How often should a record in the SSTable appear (one will always appear for the first and last element)
-    pub sparse_table_record_frequency: u32,
+    /// Even if the block is not quite size_of_compression_blocks yet, if this number is hit a new compression block is started
+    pub maximum_records_per_compression_block: u32,
 
     /// Background worker threads, must be at least 1
     pub worker_threads: u32,
@@ -37,8 +37,8 @@ impl Default for Config {
         Config {
             bloom_filter_bits: 1000,
             bloom_filter_hashes: 3,
-            entries_per_sstable: 100,
-            sparse_table_record_frequency: 10,
+            size_of_compression_blocks: 1024 * 1024 * 16, // 16MiB
+            maximum_records_per_compression_block: 100,
             worker_threads: base_thread_count as u32,
             record_allowable_size: 1024 * 1024 * 10,
             system_directory: "/var/localsm/".to_string(),

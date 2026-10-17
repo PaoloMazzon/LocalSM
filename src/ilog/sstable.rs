@@ -17,7 +17,10 @@ pub(crate) static SSTABLE_ENCODING_VERSION: u32 = 1;
 /* 5. SparseKeyIdTable struct of size previously stated in (4)   */
 /* 6. For the remainder of the file (until EOF),                 */
 /*     i. Size of the entry at this location (u32)               */
-/*    ii. ILog struct of size previously stated                  */
+/*    ii. CompressionBlock of size previously state              */
+/* Note: Sparse table entries point to the first element in the  */
+/* CompressionBlock. This means for targeted lookups you will    */
+/* only ever need to decompress at most 1 block.                 */
 /*****************************************************************/
 
 /// Just an entry's key/id/location in file for SparseKeyIdTable
@@ -97,7 +100,7 @@ impl<R: BufRead + Seek> SsTableLoader<R> {
         if !self.bloom_filter.maybe_in_filter(key) {
             return None
         }
-        let start_location = self.sparse_key_id_table.start_search_from(key)?;
+        let start_location = self.sparse_key_id_table.which_block_to_search(key, sort_key)?;
 
         todo!()
     }

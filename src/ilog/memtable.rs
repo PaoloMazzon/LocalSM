@@ -4,7 +4,7 @@ use std::path::Path;
 use spdlog::error;
 use crate::ilog::ilog::ILog;
 use crate::ilog::sstable::{EntryLocation, SSTABLE_ENCODING_VERSION, SSTABLE_MAGIC_BYTES};
-use crate::ilog::util::SparseKeyIdTable;
+use crate::ilog::util::{CompressionBlock, SparseKeyIdTable};
 use crate::util::bloomfilter::BloomFilter;
 use crate::util::config::Config;
 use crate::util::time::get_iso_time;
@@ -123,10 +123,10 @@ impl MemTable {
         bloom
     }
 
-    /// Creates the sparse key/id table for this MemTable and returns it. This is quite heavy
-    /// as it needs to sort the entire records list and binary encode every member to get its
-    /// size for the entries sparse lookup table.
-    fn create_sparse_table(&mut self, config: &Config) -> crate::util::error::Result<SparseKeyIdTable> {
+    /// Creates a sparse table and all the compressed blocks at the same time, since the sparse
+    /// table needs exact sizes. This is a very heavy function is the majority of the CPU time
+    /// involved in generating an SSTable.
+    fn create_sparse_table(&mut self, config: &Config) -> crate::util::error::Result<(SparseKeyIdTable, Vec<Vec<u8>>)> {
         self.records.sort_unstable();
         self.records.reverse();
 
@@ -136,24 +136,53 @@ impl MemTable {
 
         // We write records every n times, counting the distance to each
         let mut total_size = 0;
-        let mut counter = 0;
+        let mut compression_blocks = vec![];
+        let mut current_compression_block= CompressionBlock::new();
+
         for record in &self.records {
-            // Record this entry if its hit the proper interval or this is the last entry
-            if counter % config.sparse_table_record_frequency == 0 || counter as usize == self.records.len() - 1 {
-                table.key_ids.push(EntryLocation {
-                    key: record.key.clone(),
-                    sort_key: record.sort_key,
-                    location: total_size,
-                })
+            // If its a new compression block, add this element to the sparse table
+            if current_compression_block.logs.len() == 0 {
+                table.key_ids.push(
+                    EntryLocation {
+                        key: record.key.to_string(),
+                        sort_key: record.sort_key,
+                        location: total_size,
+                    }
+                )
             }
 
-            // Just add the size of this record
-            total_size += 4;
-            total_size += postcard::to_allocvec(record)?.len() as u64;
-            counter += 1;
+            // Add the current entry to the current compression block
+            CompressionBlock::new().add_to_block(record.clone());
+
+            // If we should close up this compression block, record the size and move the size
+            if current_compression_block.size() >= config.size_of_compression_blocks as u64 || current_compression_block.logs.len() >= config.maximum_records_per_compression_block as usize {
+                let compressed = current_compression_block.compress()?;
+                total_size += 4 + compressed.len() as u64;
+                compression_blocks.push(compressed);
+                current_compression_block = CompressionBlock::new();
+            }
         }
 
-        Ok(table)
+        // Wrap up the last compression block
+        if current_compression_block.logs.len() != 0 {
+            let compressed = current_compression_block.compress()?;
+            total_size += 4 + compressed.len() as u64;
+            compression_blocks.push(compressed);
+        }
+
+        // We record the last entry to the sparse table as well so we can quickly tell if something
+        // is out of range of the SSTable at a glance
+        if let Some(record) = self.records.last() {
+            table.key_ids.push(
+                EntryLocation {
+                    key: record.key.to_string(),
+                    sort_key: record.sort_key,
+                    location: total_size,
+                }
+            );
+        }
+
+        Ok((table, compression_blocks))
     }
 
     /// Exports the whole in-memory table to an immutable SSTable that can be dumped
@@ -163,17 +192,17 @@ impl MemTable {
         dest.write_all(&SSTABLE_MAGIC_BYTES)?;
         dest.write_all(SSTABLE_ENCODING_VERSION.to_le_bytes().as_slice())?;
         let bloom_filter = postcard::to_allocvec(&self.create_bloom_filter(config))?;
-        let sparse_table = postcard::to_allocvec(&self.create_sparse_table(config)?)?;
+        let (sparse_table, compressed_blocks) = self.create_sparse_table(config)?;
+        let sparse_table_serialized = postcard::to_allocvec(&sparse_table)?;
         dest.write_all((bloom_filter.len() as u32).to_le_bytes().as_slice())?;
         dest.write_all(&bloom_filter)?;
-        dest.write_all((sparse_table.len() as u32).to_le_bytes().as_slice())?;
-        dest.write_all(&sparse_table)?;
+        dest.write_all((sparse_table_serialized.len() as u32).to_le_bytes().as_slice())?;
+        dest.write_all(&sparse_table_serialized)?;
 
-        // Iterate over all records and encode those too
-        for record in &self.records {
-            let binary_record = postcard::to_allocvec(record)?;
-            dest.write_all((binary_record.len() as u32).to_le_bytes().as_slice())?;
-            dest.write_all(&binary_record)?;
+        // Iterate over all compressed blocks and dump them to file
+        for compressed_block in &compressed_blocks {
+            dest.write_all((compressed_block.len() as u32).to_le_bytes().as_slice())?;
+            dest.write_all(&compressed_block)?;
         }
 
         Ok(())
@@ -235,8 +264,7 @@ mod tests {
     fn test_serializing_sstable() {
         let mut mt = MemTable::new("/tmp/fake_recover.log".to_string()).unwrap();
         let config = Config {
-            sparse_table_record_frequency: 5,
-            entries_per_sstable: 20,
+            maximum_records_per_compression_block: 5,
             ..Default::default()
         };
         mt.delete("key", 0).unwrap(); // sstable entry
@@ -281,12 +309,12 @@ mod tests {
         mt.add("9", 1, vec![0, 1]).unwrap(); // zeroth entry
         let sparse_table = mt.create_sparse_table(&config).unwrap();
         assert_eq!(sparse_table.len(), 4, "Sparse table was generated wrong.");
-        assert_eq!(sparse_table.start_search_from("1").unwrap(), sparse_table.key_ids[2].location, "Sparse table key was in the wrong location.");
-        assert_eq!(sparse_table.start_search_from("2").unwrap(), sparse_table.key_ids[2].location, "Sparse table key was in the wrong location.");
-        assert_eq!(sparse_table.start_search_from("3").unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
-        assert_eq!(sparse_table.start_search_from("4").unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
-        assert_eq!(sparse_table.start_search_from("6").unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
-        assert_eq!(sparse_table.start_search_from("8").unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
-        assert_eq!(sparse_table.start_search_from("9").unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from_descending("1").unwrap(), sparse_table.key_ids[2].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from_descending("2").unwrap(), sparse_table.key_ids[2].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from_descending("3").unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from_descending("4").unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from_descending("6").unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from_descending("8").unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from_descending("9").unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
     }
 }
