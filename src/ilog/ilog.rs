@@ -50,5 +50,58 @@ impl Ord for ILog {
 
 #[cfg(test)]
 mod tests {
-    
+    use std::cmp::Ordering;
+    use crate::ilog::ilog::ILog;
+
+    #[test]
+    fn test_ordering_for_ilog() {
+        let ilog_9_1_2020 = ILog {
+            key: "9".to_string(),
+            sort_key: 1,
+            value: vec![0, 1],
+            timestamp: "2020-01-01T00:00:00-00:00".to_string(),
+            tombstone: false,
+        };
+        let ilog_1_3_2020 = ILog {
+            key: "1".to_string(),
+            sort_key: 3,
+            value: vec![0, 1],
+            timestamp: "2020-01-01T00:00:00-00:00".to_string(),
+            tombstone: false,
+        };
+        let ilog_9_2_2020 = ILog {
+            key: "9".to_string(),
+            sort_key: 2,
+            value: vec![0, 1],
+            timestamp: "2020-01-01T00:00:00-00:00".to_string(),
+            tombstone: false,
+        };
+        let ilog_1_3_2021 = ILog {
+            key: "1".to_string(),
+            sort_key: 3,
+            value: vec![0, 1],
+            timestamp: "2021-01-01T00:00:00-00:00".to_string(),
+            tombstone: false,
+        };
+        // First make sure the strings are ISO 8601
+        chrono::DateTime::parse_from_rfc3339(ilog_9_1_2020.timestamp.as_str()).unwrap();
+        chrono::DateTime::parse_from_rfc3339(ilog_1_3_2020.timestamp.as_str()).unwrap();
+        chrono::DateTime::parse_from_rfc3339(ilog_9_2_2020.timestamp.as_str()).unwrap();
+        chrono::DateTime::parse_from_rfc3339(ilog_1_3_2021.timestamp.as_str()).unwrap();
+
+        // Primary key ordering
+        assert_eq!(ilog_9_1_2020.cmp(&ilog_1_3_2020), Ordering::Greater, "");
+        assert_eq!(ilog_1_3_2020.cmp(&ilog_9_1_2020), Ordering::Less, "");
+
+        // Equality
+        assert_eq!(ilog_9_1_2020.cmp(&ilog_9_1_2020), Ordering::Equal, "");
+
+        // Secondary key ordering
+        assert_eq!(ilog_9_2_2020.cmp(&ilog_9_1_2020), Ordering::Greater, "");
+        assert_eq!(ilog_9_1_2020.cmp(&ilog_9_2_2020), Ordering::Less, "");
+
+        // Time-based ordering
+        assert_eq!(ilog_1_3_2021.cmp(&ilog_1_3_2020), Ordering::Greater, "");
+        assert_eq!(ilog_1_3_2020.cmp(&ilog_1_3_2021), Ordering::Less, "");
+    }
 }
