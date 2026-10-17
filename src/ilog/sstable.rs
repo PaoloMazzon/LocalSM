@@ -23,19 +23,6 @@ pub(crate) static SSTABLE_ENCODING_VERSION: u32 = 1;
 /* only ever need to decompress at most 1 block.                 */
 /*****************************************************************/
 
-/// Just an entry's key/id/location in file for SparseKeyIdTable
-#[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct EntryLocation {
-    /// Key for this record
-    pub key: String,
-
-    /// Sort key for this record
-    pub sort_key: i64,
-
-    /// How many bytes into the file from the top of the header this record is
-    pub location: u64,
-}
-
 /// Helps you navigate SSTables more easily
 pub(crate) struct SsTableLoader<R: BufRead + Seek> {
     pub bloom_filter: BloomFilter,
@@ -118,15 +105,15 @@ mod tests {
     use std::path::Path;
     use crate::ilog::memtable;
     use crate::ilog::memtable::MemTable;
-    use crate::ilog::sstable::{EntryLocation, SparseKeyIdTable, SsTableLoader};
+    use crate::ilog::sstable::{SparseKeyIdTable, SsTableLoader};
+    use crate::ilog::util::EntryLocation;
     use crate::util::config::Config;
 
     fn create_sstable() -> String {
         let filename = String::from("/tmp/test_sstable");
         let mut mt = MemTable::new("/tmp/asdkjakdjak.log".to_string()).unwrap();
         let config = Config {
-            sparse_table_record_frequency: 5,
-            entries_per_sstable: 20,
+            maximum_records_per_compression_block: 5,
             ..Default::default()
         };
         mt.delete("key", 0).unwrap(); // 4

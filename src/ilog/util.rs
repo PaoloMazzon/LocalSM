@@ -1,8 +1,32 @@
+use std::cmp::Ordering;
 use serde::{Deserialize, Serialize};
 use zstd_rs::{CompressionConfig, Compressor, Decompressor};
 use crate::ilog::ilog::ILog;
-use crate::ilog::sstable::EntryLocation;
 use crate::util::error::Result;
+
+/// Just an entry's key/id/location in file for SparseKeyIdTable
+#[derive(Serialize, Deserialize, Debug, PartialOrd, PartialEq, Eq)]
+pub(crate) struct EntryLocation {
+    /// Key for this record
+    pub key: String,
+
+    /// Sort key for this record
+    pub sort_key: i64,
+
+    /// How many bytes into the file from the top of the header this record is
+    pub location: u64,
+}
+
+impl Ord for EntryLocation {
+    fn cmp(&self, other: &Self) -> Ordering {
+        if self.key > other.key || (self.key == other.key && self.sort_key > other.sort_key) {
+            return Ordering::Greater
+        } else if self.key < other.key || (self.key == other.key && self.sort_key < other.sort_key) {
+            return Ordering::Less
+        }
+        Ordering::Equal
+    }
+}
 
 /// Contains a (sorted) list of key/id pairs and their locations in the file.
 /// This does not contain all the keys, but can be used to get to right
@@ -52,7 +76,20 @@ impl SparseKeyIdTable {
     /// find it at all in the SSTable. This function returns an offset where the size of the block
     /// starts, or None if the key cannot be in this table.
     pub fn start_search_from_descending(&self, key: &str) -> Option<u64> {
-        todo!("");
+        let key_str = key.to_string();
+        if self.key_ids.first()?.key < key_str || self.key_ids.last()?.key > key_str {
+            return None
+        }
+
+        let mut last_entry = self.key_ids.first()?;
+        for record in &self.key_ids[1..] {
+            if key_str >= record.key {
+                return Some(last_entry.location)
+            }
+            last_entry = record;
+        }
+
+        None
     }
 
     /// Returns the number of entries in the sparse key-id table
@@ -119,7 +156,7 @@ impl CompressionBlock {
 mod tests {
     use std::iter::zip;
     use crate::ilog::ilog::ILog;
-    use crate::ilog::sstable::EntryLocation;
+    use super::*;
     use crate::ilog::util::{CompressionBlock, SparseKeyIdTable};
 
     #[test]

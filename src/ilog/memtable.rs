@@ -3,8 +3,8 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use spdlog::error;
 use crate::ilog::ilog::ILog;
-use crate::ilog::sstable::{EntryLocation, SSTABLE_ENCODING_VERSION, SSTABLE_MAGIC_BYTES};
-use crate::ilog::util::{CompressionBlock, SparseKeyIdTable};
+use crate::ilog::sstable::{SSTABLE_ENCODING_VERSION, SSTABLE_MAGIC_BYTES};
+use crate::ilog::util::{CompressionBlock, EntryLocation, SparseKeyIdTable};
 use crate::util::bloomfilter::BloomFilter;
 use crate::util::config::Config;
 use crate::util::time::get_iso_time;
@@ -152,7 +152,7 @@ impl MemTable {
             }
 
             // Add the current entry to the current compression block
-            CompressionBlock::new().add_to_block(record.clone());
+            current_compression_block.add_to_block(record.clone());
 
             // If we should close up this compression block, record the size and move the size
             if current_compression_block.size() >= config.size_of_compression_blocks as u64 || current_compression_block.logs.len() >= config.maximum_records_per_compression_block as usize {
@@ -294,25 +294,25 @@ mod tests {
     fn test_sparse_lookup() {
         let mut mt = MemTable::new("/tmp/asdkjakdjak.log".to_string()).unwrap();
         let config = Config {
-            sparse_table_record_frequency: 3,
-            entries_per_sstable: 9,
+            maximum_records_per_compression_block: 4,
             ..Default::default()
         };
-        mt.add("1", 1, vec![0, 1]).unwrap(); // third entry
+        mt.add("1", 1, vec![0, 1]).unwrap(); // second/third entry
         mt.add("2", 8, vec![0, 1]).unwrap();
-        mt.add("3", 1, vec![0, 1]).unwrap(); // second entry
+        mt.add("3", 1, vec![0, 1]).unwrap();
         mt.add("4", 1, vec![0, 1]).unwrap();
-        mt.add("4", 3, vec![0, 1]).unwrap();
-        mt.add("6", 1, vec![0, 1]).unwrap(); // first entry
+        mt.add("4", 3, vec![0, 1]).unwrap(); // first entry
+        mt.add("6", 1, vec![0, 1]).unwrap();
         mt.add("6", 1, vec![2, 3]).unwrap();
         mt.add("8", 9, vec![0, 1]).unwrap();
         mt.add("9", 1, vec![0, 1]).unwrap(); // zeroth entry
-        let sparse_table = mt.create_sparse_table(&config).unwrap();
+        let (sparse_table, _) = mt.create_sparse_table(&config).unwrap();
+        println!("{:#?}", sparse_table);
         assert_eq!(sparse_table.len(), 4, "Sparse table was generated wrong.");
-        assert_eq!(sparse_table.start_search_from_descending("1").unwrap(), sparse_table.key_ids[2].location, "Sparse table key was in the wrong location.");
-        assert_eq!(sparse_table.start_search_from_descending("2").unwrap(), sparse_table.key_ids[2].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from_descending("1").unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from_descending("2").unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
         assert_eq!(sparse_table.start_search_from_descending("3").unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
-        assert_eq!(sparse_table.start_search_from_descending("4").unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from_descending("4").unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
         assert_eq!(sparse_table.start_search_from_descending("6").unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
         assert_eq!(sparse_table.start_search_from_descending("8").unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
         assert_eq!(sparse_table.start_search_from_descending("9").unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
