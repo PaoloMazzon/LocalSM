@@ -16,6 +16,7 @@ jobs:
         uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@nightly
       - name: Run unit and integration tests
+        id: coverage
         run: |
               cargo install cargo-llvm-cov
               mkdir coverage
@@ -23,7 +24,7 @@ jobs:
               echo "========================================="
               echo "LINE COVERAGE: $(jq .data[0].totals.lines.percent coverage/coverage-summary.json)"
               echo "========================================="
-              echo "$(jq .data[0].totals.lines.percent coverage/coverage-summary.json)" >> "$GITHUB_OUTPUT"
+              echo "percentage=$(jq .data[0].totals.lines.percent coverage/coverage-summary.json)" >> "$GITHUB_OUTPUT"
       - name: Generate coverage badge
         uses: ozankasikci/rust-test-coverage-badge@v1
         with:
