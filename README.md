@@ -10,7 +10,7 @@ This is a toy project for a really rudimentary document/NoSQL database.
  - [ ] Disk-based SSTable searching
    - [x] Sparse key/location lookup table
    - [x] Serializing/deserializing SSTable
-   - [ ] Encode by blocks, compressing each one
+   - [x] Encode by blocks, compressing each one
    - [ ] Find keys through walking files
    - [ ] Iterate over all keys in a file
  - [ ] Compaction algorithm

@@ -309,12 +309,12 @@ mod tests {
         let (sparse_table, _) = mt.create_sparse_table(&config).unwrap();
         println!("{:#?}", sparse_table);
         assert_eq!(sparse_table.len(), 4, "Sparse table was generated wrong.");
-        assert_eq!(sparse_table.start_search_from_descending("1").unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
-        assert_eq!(sparse_table.start_search_from_descending("2").unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
-        assert_eq!(sparse_table.start_search_from_descending("3").unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
-        assert_eq!(sparse_table.start_search_from_descending("4").unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
-        assert_eq!(sparse_table.start_search_from_descending("6").unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
-        assert_eq!(sparse_table.start_search_from_descending("8").unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
-        assert_eq!(sparse_table.start_search_from_descending("9").unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from_descending("1", None).unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from_descending("2", None).unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from_descending("3", None).unwrap(), sparse_table.key_ids[1].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from_descending("4", None).unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from_descending("6", None).unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from_descending("8", None).unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
+        assert_eq!(sparse_table.start_search_from_descending("9", None).unwrap(), sparse_table.key_ids[0].location, "Sparse table key was in the wrong location.");
     }
 }

@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::process::id;
 use serde::{Deserialize, Serialize};
 use zstd_rs::{CompressionConfig, Compressor, Decompressor};
 use crate::ilog::ilog::ILog;
@@ -28,6 +29,39 @@ impl Ord for EntryLocation {
     }
 }
 
+/// An abstraction to make finding occurrences easier to implement
+#[derive(PartialOrd, PartialEq, Eq, Clone, Debug)]
+struct EntryIdentifier {
+    key: String,
+    sort_key: Option<i64>
+}
+
+impl From<&EntryLocation> for EntryIdentifier {
+    fn from(value: &EntryLocation) -> Self {
+        Self {
+            key: value.key.clone(),
+            sort_key: Some(value.sort_key),
+        }
+    }
+}
+
+impl Ord for EntryIdentifier {
+    fn cmp(&self, other: &Self) -> Ordering {
+        if self.key > other.key {
+            return Ordering::Greater
+        } else if self.key < other.key {
+            return Ordering::Less
+        } else if let Some(self_sort) = self.sort_key && let Some(other_sort) = other.sort_key {
+            if self_sort > other_sort {
+                return Ordering::Greater
+            } else if self_sort < other_sort {
+                return Ordering::Less
+            }
+        }
+        Ordering::Equal
+    }
+}
+
 /// Contains a (sorted) list of key/id pairs and their locations in the file.
 /// This does not contain all the keys, but can be used to get to right
 /// ballpark quickly.
@@ -41,16 +75,22 @@ impl SparseKeyIdTable {
     /// find the first block you should start searching from (in reverse, since the SSTable files
     /// are sorted in descending order). This function returns an offset where the size of the block
     /// starts, or None if the key cannot be in this table.
-    pub fn start_search_from_ascending(&self, key: &str) -> Option<u64> {
-        let key_str = key.to_string();
-        if self.key_ids.first()?.key < key_str || self.key_ids.last()?.key > key_str {
+    pub fn start_search_from_ascending(&self, key: &str, sort_key: Option<i64>) -> Option<u64> {
+        let identifier = EntryIdentifier {
+            key: key.to_string(),
+            sort_key,
+        };
+
+        // Check if the identifier is outside the range of the table
+        if identifier.cmp(&self.key_ids.first()?.into()) == Ordering::Greater || identifier.cmp(&self.key_ids.last()?.into()) == Ordering::Less {
             return None
         }
 
         let mut last_entry = self.key_ids.last()?;
         for record in self.key_ids.iter().rev() {
-            if record.key >= key_str {
-                return Some(last_entry.location)
+            match identifier.cmp(&record.into()) {
+                Ordering::Equal | Ordering::Less => return Some(last_entry.location),
+                Ordering::Greater => (),
             }
             last_entry = record;
         }
@@ -63,16 +103,22 @@ impl SparseKeyIdTable {
     /// descending order, you are guaranteed to either find it in the block this points to, or not
     /// find it at all in the SSTable. This function returns an offset where the size of the block
     /// starts (from the top of the header), or None if the key cannot be in this table.
-    pub fn start_search_from_descending(&self, key: &str) -> Option<u64> {
-        let key_str = key.to_string();
-        if self.key_ids.first()?.key < key_str || self.key_ids.last()?.key > key_str {
+    pub fn start_search_from_descending(&self, key: &str, sort_key: Option<i64>) -> Option<u64> {
+        let identifier = EntryIdentifier {
+            key: key.to_string(),
+            sort_key,
+        };
+
+        // Check if the identifier is outside the range of the table
+        if identifier.cmp(&self.key_ids.first()?.into()) == Ordering::Greater || identifier.cmp(&self.key_ids.last()?.into()) == Ordering::Less {
             return None
         }
 
         let mut last_entry = self.key_ids.first()?;
         for record in &self.key_ids[1..] {
-            if key_str >= record.key {
-                return Some(last_entry.location)
+            match identifier.cmp(&record.into()) {
+                Ordering::Equal | Ordering::Greater => return Some(last_entry.location),
+                Ordering::Less => (),
             }
             last_entry = record;
         }
@@ -180,21 +226,23 @@ mod tests {
     }
 
     #[test]
-    fn test_start_search_from() {
+    fn test_start_search_from_descending() {
+        // 8/9 8/1 6/1 4/1 1/1
         let table = get_test_table();
         // Tests for the entries not in the table
-        assert_eq!(table.start_search_from_descending("2").unwrap(), 3, "Failed to find an entry in a SparseKeyIdTable");
-        assert_eq!(table.start_search_from_descending("3").unwrap(), 3, "Failed to find an entry in a SparseKeyIdTable");
-        assert_eq!(table.start_search_from_descending("5").unwrap(), 2, "Failed to find an entry in a SparseKeyIdTable");
-        assert_eq!(table.start_search_from_descending("7").unwrap(), 1, "Failed to find an entry in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from_descending("2", None), Some(3), "Failed to find an entry in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from_descending("3", None), Some(3), "Failed to find an entry in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from_descending("5", None), Some(2), "Failed to find an entry in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from_descending("7", None), Some(1), "Failed to find an entry in a SparseKeyIdTable");
 
         // More targeted/edge case
-        assert_eq!(table.start_search_from_descending("1").unwrap(), 3, "Failed to find the very first entry in a SparseKeyIdTable");
-        assert_eq!(table.start_search_from_descending("4").unwrap(), 2, "Failed to find a specific entry in a SparseKeyIdTable");
-        assert_eq!(table.start_search_from_descending("6").unwrap(), 1, "Failed to find a specific entry in a SparseKeyIdTable");
-        assert_eq!(table.start_search_from_descending("8").unwrap(), 0, "Failed to find a specific entry in a SparseKeyIdTable");
-        assert_eq!(table.start_search_from_descending("9"), None, "Found an entry where there should not have been one in a SparseKeyIdTable");
-        assert_eq!(table.start_search_from_descending("0"), None, "Found an entry where there should not have been one in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from_descending("1", None), Some(3), "Failed to find the very first entry in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from_descending("4", None), Some(2), "Failed to find a specific entry in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from_descending("6", None), Some(1), "Failed to find a specific entry in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from_descending("8", None), Some(0), "Failed to find a specific entry in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from_descending("8", Some(0)), Some(1), "Failed to find a specific entry in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from_descending("9", None), None, "Found an entry where there should not have been one in a SparseKeyIdTable");
+        assert_eq!(table.start_search_from_descending("0", None), None, "Found an entry where there should not have been one in a SparseKeyIdTable");
     }
 
     #[test]
@@ -239,16 +287,17 @@ mod tests {
     fn test_search_ascending() {
         // 8/9 8/1 6/1 4/1 1/1
         let table = get_test_table();
-        assert_eq!(table.start_search_from_ascending("9"), None, "Ascending block searches are finding the wrong block.");
-        assert_eq!(table.start_search_from_ascending("8"), Some(2), "Ascending block searches are finding the wrong block.");
-        assert_eq!(table.start_search_from_ascending("7"), Some(2), "Ascending block searches are finding the wrong block.");
-        assert_eq!(table.start_search_from_ascending("6"), Some(3), "Ascending block searches are finding the wrong block.");
-        assert_eq!(table.start_search_from_ascending("5"), Some(3), "Ascending block searches are finding the wrong block.");
-        assert_eq!(table.start_search_from_ascending("4"), Some(4), "Ascending block searches are finding the wrong block.");
-        assert_eq!(table.start_search_from_ascending("3"), Some(4), "Ascending block searches are finding the wrong block.");
-        assert_eq!(table.start_search_from_ascending("2"), Some(4), "Ascending block searches are finding the wrong block.");
-        assert_eq!(table.start_search_from_ascending("1"), Some(4), "Ascending block searches are finding the wrong block.");
-        assert_eq!(table.start_search_from_ascending("0"), None, "Ascending block searches are finding the wrong block.");
+        assert_eq!(table.start_search_from_ascending("9", None), None, "Ascending block searches are finding the wrong block.");
+        assert_eq!(table.start_search_from_ascending("8", None), Some(2), "Ascending block searches are finding the wrong block.");
+        assert_eq!(table.start_search_from_ascending("8", Some(5)), Some(1), "Ascending block searches are finding the wrong block.");
+        assert_eq!(table.start_search_from_ascending("7", None), Some(2), "Ascending block searches are finding the wrong block.");
+        assert_eq!(table.start_search_from_ascending("6", None), Some(3), "Ascending block searches are finding the wrong block.");
+        assert_eq!(table.start_search_from_ascending("5", None), Some(3), "Ascending block searches are finding the wrong block.");
+        assert_eq!(table.start_search_from_ascending("4", None), Some(4), "Ascending block searches are finding the wrong block.");
+        assert_eq!(table.start_search_from_ascending("3", None), Some(4), "Ascending block searches are finding the wrong block.");
+        assert_eq!(table.start_search_from_ascending("2", None), Some(4), "Ascending block searches are finding the wrong block.");
+        assert_eq!(table.start_search_from_ascending("1", None), Some(4), "Ascending block searches are finding the wrong block.");
+        assert_eq!(table.start_search_from_ascending("0", None), None, "Ascending block searches are finding the wrong block.");
     }
 
     #[test]
