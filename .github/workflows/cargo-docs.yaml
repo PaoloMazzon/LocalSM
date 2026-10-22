@@ -1,0 +1,49 @@
+name: Deploy Cargo Docs to GitHub Pages
+
+on:
+  push:
+    branches: ["main"] # Change to your default branch name if different
+  workflow_dispatch:
+
+# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one concurrent deployment
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Generate Documentation
+        run: cargo doc --no-deps --all-features
+
+      - name: Create Redirect Entrypoint
+        run: |
+          # Extracts the repository/crate name dynamically and normalizes hyphens to underscores
+          CRATE_NAME=$(echo '${{ github.repository }}' | cut -f2 -d"/" | tr '[:upper:]' '[:lower:]' | tr '-' '_')
+          echo "<meta http-equiv=\"refresh\" content=\"0; url=${CRATE_NAME}/index.html\">" > target/doc/index.html
+          touch target/doc/.nojekyll
+
+      - name: Upload Docs Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/doc
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

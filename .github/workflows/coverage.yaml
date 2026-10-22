@@ -1,0 +1,28 @@
+name: Rust Test
+
+on:
+  push:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build_and_test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Run unit and integration tests
+        run: |
+              cargo install cargo-llvm-cov
+              mkdir coverage
+              cargo llvm-cov --json --output-path coverage/coverage-summary.json
+              echo "========================================="
+              echo "LINE COVERAGE: $(jq .data[0].totals.lines.percent coverage/coverage-summary.json)"
+              echo "========================================="
+      - name: Update Coverage Badge
+        if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: we-cli/coverage-badge-action@main

@@ -1,5 +1,7 @@
 This is a toy project for a really rudimentary document/NoSQL database.
 
+[![cov](https://paolomazzon.github.io/localsm/badges/coverage.svg)](https://github.com/<you>/<repo>/actions)
+
 ## Details
 
  - [x] `BitField` implementation
