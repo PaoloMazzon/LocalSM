@@ -41,22 +41,21 @@ impl SparseKeyIdTable {
     /// (from the end of the header) of the size/compression block it may be located, or returns
     /// None if its guaranteed to not be in this SSTable.
     pub fn which_block_to_search(&self, key: &str, sort_key: i64) -> Option<u64> {
-        todo!("");
         let mut previous_location = 0;
         let key_string = key.to_string();
+        let requested_record = EntryLocation {
+            key: key.to_string(),
+            sort_key,
+            location: 0,
+        };
 
-        // The requested record is not within the bounds of this table since sparse tables always
-        // include the first and last element in the SSTable.
-        if key_string < self.key_ids.last()?.key || key_string > self.key_ids.first()?.key {
+        if requested_record.cmp(self.key_ids.first()?) == Ordering::Greater || requested_record.cmp(self.key_ids.last()?) == Ordering::Less {
             return None
         }
 
         // Find where it should be in reverse order
         for record in &self.key_ids {
-            if key_string >= record.key {
-                return Some(previous_location)
-            }
-            previous_location = record.location;
+            todo!("this")
         }
 
         Some(previous_location)
@@ -159,9 +158,8 @@ mod tests {
     use super::*;
     use crate::ilog::util::{CompressionBlock, SparseKeyIdTable};
 
-    #[test]
-    fn test_start_search_from() {
-        let table = SparseKeyIdTable {
+    fn get_test_table() -> SparseKeyIdTable {
+        SparseKeyIdTable {
             key_ids: vec![
                 EntryLocation {
                     key: "8".to_string(),
@@ -189,7 +187,12 @@ mod tests {
                     location: 4,
                 },
             ],
-        };
+        }
+    }
+
+    #[test]
+    fn test_start_search_from() {
+        let table = get_test_table();
         // Tests for the entries not in the table
         assert_eq!(table.start_search_from_descending("2").unwrap(), 3, "Failed to find an entry in a SparseKeyIdTable");
         assert_eq!(table.start_search_from_descending("3").unwrap(), 3, "Failed to find an entry in a SparseKeyIdTable");
@@ -241,5 +244,39 @@ mod tests {
         for (element1, element2) in zip(decompressed_block.logs.iter(), block.logs.iter()) {
             assert_eq!(element1, element2, "At least 1 element from the compressed and decompressed block didn't match. \n{:#?}\nvs{:#?}", element1, element2);
         }
+    }
+
+    #[test]
+    fn test_which_block_to_search() {
+        // 8/9 8/1 6/1 4/1 1/1
+        let table = get_test_table();
+        assert_eq!(table.which_block_to_search("9", 1), None, "Exact block searches are finding the wrong block.");
+        assert_eq!(table.which_block_to_search("8", 9), Some(0), "Exact block searches are finding the wrong block.");
+        assert_eq!(table.which_block_to_search("8", 5), Some(0), "Exact block searches are finding the wrong block.");
+        assert_eq!(table.which_block_to_search("8", 0), Some(1), "Exact block searches are finding the wrong block.");
+        assert_eq!(table.which_block_to_search("7", 1), Some(1), "Exact block searches are finding the wrong block.");
+        assert_eq!(table.which_block_to_search("6", 1), Some(2), "Exact block searches are finding the wrong block.");
+        assert_eq!(table.which_block_to_search("5", 1), Some(2), "Exact block searches are finding the wrong block.");
+        assert_eq!(table.which_block_to_search("4", 1), Some(3), "Exact block searches are finding the wrong block.");
+        assert_eq!(table.which_block_to_search("3", 1), Some(3), "Exact block searches are finding the wrong block.");
+        assert_eq!(table.which_block_to_search("2", 1), Some(3), "Exact block searches are finding the wrong block.");
+        assert_eq!(table.which_block_to_search("1", 1), Some(4), "Exact block searches are finding the wrong block.");
+        assert_eq!(table.which_block_to_search("0", 1), None, "Exact block searches are finding the wrong block.");
+    }
+
+    #[test]
+    fn test_search_ascending() {
+        // 8/9 8/1 6/1 4/1 1/1
+        let table = get_test_table();
+        assert_eq!(table.start_search_from_ascending("9"), None, "Ascending block searches are finding the wrong block.");
+        assert_eq!(table.start_search_from_ascending("8"), Some(2), "Ascending block searches are finding the wrong block.");
+        assert_eq!(table.start_search_from_ascending("7"), Some(2), "Ascending block searches are finding the wrong block.");
+        assert_eq!(table.start_search_from_ascending("6"), Some(3), "Ascending block searches are finding the wrong block.");
+        assert_eq!(table.start_search_from_ascending("5"), Some(3), "Ascending block searches are finding the wrong block.");
+        assert_eq!(table.start_search_from_ascending("4"), Some(4), "Ascending block searches are finding the wrong block.");
+        assert_eq!(table.start_search_from_ascending("3"), Some(4), "Ascending block searches are finding the wrong block.");
+        assert_eq!(table.start_search_from_ascending("2"), Some(4), "Ascending block searches are finding the wrong block.");
+        assert_eq!(table.start_search_from_ascending("1"), Some(4), "Ascending block searches are finding the wrong block.");
+        assert_eq!(table.start_search_from_ascending("0"), None, "Ascending block searches are finding the wrong block.");
     }
 }
