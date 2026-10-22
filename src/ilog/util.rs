@@ -37,43 +37,32 @@ pub(crate) struct SparseKeyIdTable {
 }
 
 impl SparseKeyIdTable {
-    /// If you are looking for a specific key and sort key, this will either return the exact offset
-    /// (from the end of the header) of the size/compression block it may be located, or returns
-    /// None if its guaranteed to not be in this SSTable.
-    pub fn which_block_to_search(&self, key: &str, sort_key: i64) -> Option<u64> {
-        let mut previous_location = 0;
-        let key_string = key.to_string();
-        let requested_record = EntryLocation {
-            key: key.to_string(),
-            sort_key,
-            location: 0,
-        };
-
-        if requested_record.cmp(self.key_ids.first()?) == Ordering::Greater || requested_record.cmp(self.key_ids.last()?) == Ordering::Less {
-            return None
-        }
-
-        // Find where it should be in reverse order
-        for record in &self.key_ids {
-            todo!("this")
-        }
-
-        Some(previous_location)
-    }
-
     /// If you are searching for the lowest instance of a given primary key, you would use this to
     /// find the first block you should start searching from (in reverse, since the SSTable files
     /// are sorted in descending order). This function returns an offset where the size of the block
     /// starts, or None if the key cannot be in this table.
     pub fn start_search_from_ascending(&self, key: &str) -> Option<u64> {
-        todo!("");
+        let key_str = key.to_string();
+        if self.key_ids.first()?.key < key_str || self.key_ids.last()?.key > key_str {
+            return None
+        }
+
+        let mut last_entry = self.key_ids.last()?;
+        for record in self.key_ids.iter().rev() {
+            if record.key >= key_str {
+                return Some(last_entry.location)
+            }
+            last_entry = record;
+        }
+
+        None
     }
 
     /// If you are searching for the highest instance of a given primary key, you would use this to
     /// find the first compression block to start searching from. Because SSTables are organized in
     /// descending order, you are guaranteed to either find it in the block this points to, or not
     /// find it at all in the SSTable. This function returns an offset where the size of the block
-    /// starts, or None if the key cannot be in this table.
+    /// starts (from the top of the header), or None if the key cannot be in this table.
     pub fn start_search_from_descending(&self, key: &str) -> Option<u64> {
         let key_str = key.to_string();
         if self.key_ids.first()?.key < key_str || self.key_ids.last()?.key > key_str {
@@ -247,24 +236,6 @@ mod tests {
     }
 
     #[test]
-    fn test_which_block_to_search() {
-        // 8/9 8/1 6/1 4/1 1/1
-        let table = get_test_table();
-        assert_eq!(table.which_block_to_search("9", 1), None, "Exact block searches are finding the wrong block.");
-        assert_eq!(table.which_block_to_search("8", 9), Some(0), "Exact block searches are finding the wrong block.");
-        assert_eq!(table.which_block_to_search("8", 5), Some(0), "Exact block searches are finding the wrong block.");
-        assert_eq!(table.which_block_to_search("8", 0), Some(1), "Exact block searches are finding the wrong block.");
-        assert_eq!(table.which_block_to_search("7", 1), Some(1), "Exact block searches are finding the wrong block.");
-        assert_eq!(table.which_block_to_search("6", 1), Some(2), "Exact block searches are finding the wrong block.");
-        assert_eq!(table.which_block_to_search("5", 1), Some(2), "Exact block searches are finding the wrong block.");
-        assert_eq!(table.which_block_to_search("4", 1), Some(3), "Exact block searches are finding the wrong block.");
-        assert_eq!(table.which_block_to_search("3", 1), Some(3), "Exact block searches are finding the wrong block.");
-        assert_eq!(table.which_block_to_search("2", 1), Some(3), "Exact block searches are finding the wrong block.");
-        assert_eq!(table.which_block_to_search("1", 1), Some(4), "Exact block searches are finding the wrong block.");
-        assert_eq!(table.which_block_to_search("0", 1), None, "Exact block searches are finding the wrong block.");
-    }
-
-    #[test]
     fn test_search_ascending() {
         // 8/9 8/1 6/1 4/1 1/1
         let table = get_test_table();
@@ -278,5 +249,27 @@ mod tests {
         assert_eq!(table.start_search_from_ascending("2"), Some(4), "Ascending block searches are finding the wrong block.");
         assert_eq!(table.start_search_from_ascending("1"), Some(4), "Ascending block searches are finding the wrong block.");
         assert_eq!(table.start_search_from_ascending("0"), None, "Ascending block searches are finding the wrong block.");
+    }
+
+    #[test]
+    fn test_ordering_for_entry_location() {
+        let entry_1 = EntryLocation {
+            key: "1".to_string(),
+            sort_key: 0,
+            location: 0,
+        };
+        let entry_2 = EntryLocation {
+            key: "1".to_string(),
+            sort_key: 2,
+            location: 0,
+        };
+        let entry_3 = EntryLocation {
+            key: "3".to_string(),
+            sort_key: 0,
+            location: 0,
+        };
+        assert_eq!(entry_1.cmp(&entry_1), Ordering::Equal, "Equal ordering is broken.");
+        assert_eq!(entry_1.cmp(&entry_2), Ordering::Less, "Less ordering is broken.");
+        assert_eq!(entry_3.cmp(&entry_2), Ordering::Greater, "Greater ordering is broken.");
     }
 }

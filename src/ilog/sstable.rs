@@ -87,7 +87,7 @@ impl<R: BufRead + Seek> SsTableLoader<R> {
         if !self.bloom_filter.maybe_in_filter(key) {
             return None
         }
-        let start_location = self.sparse_key_id_table.which_block_to_search(key, sort_key)?;
+        //let start_location = self.sparse_key_id_table.which_block_to_search(key, sort_key)?;
 
         todo!()
     }
