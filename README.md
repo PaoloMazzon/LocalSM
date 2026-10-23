@@ -1,8 +1,21 @@
-This is a toy project for a really rudimentary document/NoSQL database.
+This is a toy project for a really rudimentary document/NoSQL database. There
+are no real plans on implementing something like a querying interface, I'm
+focused almost entirely on the storage engine. As such, this would be more
+useful as an "on-disk hashmap."
 
 ![Coverage](assets/coverage.svg)
 
-## Details
+# Building/Using/Running
+It's pure Rust, you can include it in your project with something like
+
+```sh
+cargo add localsm --git https://github.com/PaoloMazzon/LocalSM --branch main
+```
+
+## Documentation
+[Rust docs are auto-generated into GH pages.](https://paolomazzon.github.io/LocalSM/localsm/index.html)
+
+# Roadmap
 
  - [x] `BitField` implementation
  - [x] `BloomFilter` implementation

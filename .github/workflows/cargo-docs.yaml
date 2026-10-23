@@ -30,7 +30,7 @@ jobs:
         uses: dtolnay/rust-toolchain@nightly
 
       - name: Generate Documentation
-        run: cargo doc --no-deps --all-features
+        run: cargo doc --no-deps --all-features --document-private-items
 
       - name: Create Redirect Entrypoint
         run: |

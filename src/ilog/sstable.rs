@@ -76,18 +76,12 @@ impl<R: BufRead + Seek> SsTableLoader<R> {
         self.get(key, sort_key).is_some()
     }
 
-    /// Tries to get a key from a table, returning None if it is not present. This
-    /// typically involves a bit of file I/O, but some tricks are used to speed this
-    /// up. First, this function will use its in-memory bloom filter to quickly rule
-    /// out keys that aren't present. Past that point it will use a sparse key/id
-    /// (also in-memory) to jump to the part of the file closest to where your potential
-    /// key is located. This is still much heavier than a hash-map or something similar
-    /// but incredibly performant as far as disk lookups go.
-    pub fn get(&self, key: &str, sort_key: i64) -> Option<ILog> {
+    /// Tries to get a key from an SSTable. Returns None if the requested key is not in the table.
+    pub fn get(&self, key: &str, sort_key: i64) -> Option<&ILog> {
         if !self.bloom_filter.maybe_in_filter(key) {
             return None
         }
-        //let start_location = self.sparse_key_id_table.which_block_to_search(key, sort_key)?;
+        let start_location = self.sparse_key_id_table.start_search_from_descending(key, Some(sort_key))?;
 
         todo!()
     }
