@@ -1,9 +1,11 @@
-use std::io::{BufRead, Seek};
-use serde::{Deserialize, Serialize};
+use std::io::{BufRead, Seek, SeekFrom};
+use spdlog::{error, warn, Logger};
 use crate::ilog::ilog::ILog;
-use crate::ilog::util::SparseKeyIdTable;
+use crate::ilog::util::{CompressionBlock, SparseKeyIdTable};
 use crate::util::bloomfilter::BloomFilter;
+use crate::util::config::Config;
 use crate::util::error::{LsmError, Result};
+use crate::util::error::LsmError::EntryNotPresent;
 
 pub(crate) static SSTABLE_MAGIC_BYTES: [u8; 4] = [255, 92, 54, 92];
 pub(crate) static SSTABLE_ENCODING_VERSION: u32 = 1;
@@ -27,12 +29,15 @@ pub(crate) static SSTABLE_ENCODING_VERSION: u32 = 1;
 pub(crate) struct SsTableLoader<R: BufRead + Seek> {
     pub bloom_filter: BloomFilter,
     pub sparse_key_id_table: SparseKeyIdTable,
+    end_of_header: u64,
     reader: R,
+    config: Config,
+    logger: Logger,
 }
 
 impl<R: BufRead + Seek> SsTableLoader<R> {
     /// Loads the header out of an SsTable
-    pub fn load(mut buffer: R) -> Result<Self> {
+    pub fn load(mut buffer: R, logger: Logger, config: Config) -> Result<Self> {
         // Validate magic bytes
         {
             let mut magic_bytes: [u8; 4] = [0, 0, 0, 0];
@@ -67,23 +72,62 @@ impl<R: BufRead + Seek> SsTableLoader<R> {
         Ok(Self {
             bloom_filter,
             sparse_key_id_table,
+            end_of_header: buffer.stream_position()?,
             reader: buffer,
+            config,
+            logger,
         })
     }
 
-    /// Returns true if a particular key exists on this table
-    pub fn has(&self, key: &str, sort_key: i64) -> bool {
-        self.get(key, sort_key).is_some()
+    /// Returns true if a particular key exists on this table. None will be returned if the key
+    /// cannot be found for any reason, including but not limited to:
+    ///  1. The block it's in being corrupted
+    ///  2. The file or stream being corrupted
+    ///  3. The file ends prematurely
+    /// Use `get` for more accurate results.
+    pub fn has(&mut self, key: &str, sort_key: i64) -> bool {
+        self.get(key, sort_key).is_ok()
     }
 
     /// Tries to get a key from an SSTable. Returns None if the requested key is not in the table.
-    pub fn get(&self, key: &str, sort_key: i64) -> Option<&ILog> {
+    pub fn get(&mut self, key: &str, sort_key: i64) -> Result<ILog> {
         if !self.bloom_filter.maybe_in_filter(key) {
-            return None
+            return Err(LsmError::EntryNotPresent)
         }
-        let start_location = self.sparse_key_id_table.start_search_from_descending(key, Some(sort_key))?;
+        let start_location = self.sparse_key_id_table.start_search_from_descending(key, Some(sort_key))
+            .ok_or_else(|| LsmError::EntryNotPresent)?;
 
-        todo!()
+        // Now we search until 1 of three things happens:
+        //  1. We find the entry we want
+        //  2. We locate an entry who's key/sort key are larger than our query
+        //  3. We reach the end of the file
+        // 2 is theoretically impossible but who's to say.
+        let mut attempts = 0;
+        loop {
+            let block = {
+                self.reader.seek(SeekFrom::Start(self.end_of_header + start_location))?;
+                let size_of_block = self.reader.read_le::<u32>()?;
+                let mut bytes = Vec::with_capacity(size_of_block as usize);
+                self.reader.read_exact(bytes.as_mut_slice())?;
+                let b: CompressionBlock = postcard::from_bytes(bytes.as_slice())?;
+                b
+            };
+            for log in &block.logs {
+                if log.key.as_str() > key || (log.key.as_str() == key && log.sort_key > sort_key) {
+                    return Err(EntryNotPresent)
+                }
+                if log.key.as_str() == key && log.sort_key == sort_key {
+                    return Ok(log.clone())
+                }
+            }
+
+            // Guarantees no infinite loop
+            attempts += 1;
+            if attempts > self.sparse_key_id_table.len() {
+                error!(logger: self.logger, "Looped for too long while trying to find the key {}:{} with sparse table {:?}.", key, sort_key, self.sparse_key_id_table);
+                return Err(EntryNotPresent)
+            }
+        }
     }
 
     /// Collects all entries with a given key from a map
@@ -138,7 +182,7 @@ mod tests {
     fn test_loading_from_memtable() {
         let filename = create_sstable();
         let file = BufReader::new(File::open(Path::new(filename.as_str())).unwrap());
-        let loader = SsTableLoader::load(file).unwrap();
+        let loader = SsTableLoader::load(file, spdlog::Logger::builder().build().unwrap(), Config::default()).unwrap();
         assert_eq!(loader.bloom_filter.maybe_in_filter("nm,"), true, "nm, was not found in the bloom filter! File parsing probably went wrong.");
         assert_eq!(loader.bloom_filter.maybe_in_filter("cvb"), true, "cvb was not found in the bloom filter! File parsing probably went wrong.");
         assert_eq!(loader.bloom_filter.maybe_in_filter("vbn"), true, "vbn was not found in the bloom filter! File parsing probably went wrong.");
