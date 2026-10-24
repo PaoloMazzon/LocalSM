@@ -155,34 +155,36 @@ mod tests {
             ..Default::default()
         };
         mt.delete("key", 0).unwrap(); // 4
-        mt.add("asd", 1, vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add("fgh", 2, vec![0, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add("hjk", 3, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add("qwe", 4, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add("wer", 5, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap(); // 3
-        mt.add("ert", 6, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add("rty", 7, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add("tyu", 8, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add("yui", 9, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add("uio", 10, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap(); // 2
-        mt.add("iop", 11, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add("op[", 12, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add("p[]", 13, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add("zxc", 14, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add("xcv", 15, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap(); // 1
-        mt.add("cvb", 16, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add("vbn", 17, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add("bnm", 18, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap();
-        mt.add("nm,", 19, vec![1, 1, 2, 3, 4, 5, 6, 7]).unwrap(); // 0
+        mt.add("asd", 1, vec![0, 2]).unwrap();
+        mt.add("fgh", 2, vec![0, 2]).unwrap();
+        mt.add("hjk", 3, vec![1, 2]).unwrap();
+        mt.add("qwe", 4, vec![1, 2]).unwrap();
+        mt.add("wer", 5, vec![1, 2]).unwrap(); // 3
+        mt.add("ert", 6, vec![1, 2]).unwrap();
+        mt.add("rty", 7, vec![1, 2]).unwrap();
+        mt.add("tyu", 8, vec![1, 2]).unwrap();
+        mt.add("yui", 9, vec![1, 2]).unwrap();
+        mt.add("uio", 10, vec![1, 2]).unwrap(); // 2
+        mt.add("iop", 11, vec![1, 2]).unwrap();
+        mt.add("op[", 12, vec![1, 2]).unwrap();
+        mt.add("p[]", 13, vec![1, 2]).unwrap();
+        mt.add("zxc", 14, vec![1, 2]).unwrap();
+        mt.add("xcv", 15, vec![1, 2]).unwrap(); // 1
+        mt.add("cvb", 16, vec![1, 2]).unwrap();
+        mt.add("vbn", 17, vec![1, 2]).unwrap();
+        mt.add("bnm", 18, vec![1, 2]).unwrap();
+        mt.add("nm,", 19, vec![1, 2]).unwrap(); // 0
         mt.export_to_sstable(&config, &mut File::create(filename.as_str()).unwrap()).unwrap();
         filename
     }
 
     #[test]
-    fn test_loading_from_memtable() {
+    fn test_loading_from_sstable() {
         let filename = create_sstable();
         let file = BufReader::new(File::open(Path::new(filename.as_str())).unwrap());
-        let loader = SsTableLoader::load(file, spdlog::Logger::builder().build().unwrap(), Config::default()).unwrap();
+        let mut loader = SsTableLoader::load(file, spdlog::Logger::builder().build().unwrap(), Config::default()).unwrap();
+
+        // Validate bloom filter
         assert_eq!(loader.bloom_filter.maybe_in_filter("nm,"), true, "nm, was not found in the bloom filter! File parsing probably went wrong.");
         assert_eq!(loader.bloom_filter.maybe_in_filter("cvb"), true, "cvb was not found in the bloom filter! File parsing probably went wrong.");
         assert_eq!(loader.bloom_filter.maybe_in_filter("vbn"), true, "vbn was not found in the bloom filter! File parsing probably went wrong.");
@@ -191,5 +193,8 @@ mod tests {
         assert_eq!(loader.bloom_filter.maybe_in_filter("fgh"), true, "fgh was not found in the bloom filter! File parsing probably went wrong.");
         assert_eq!(loader.bloom_filter.maybe_in_filter("hjk"), true, "hjk was not found in the bloom filter! File parsing probably went wrong.");
         assert_eq!(loader.sparse_key_id_table.len(), 5, "Sparse table was not serialized/deserialzed properly.");
+
+        // Validate get function
+        loader.get("tyu", 8).unwrap();
     }
 }
