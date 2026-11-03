@@ -107,13 +107,14 @@ impl<R: BufRead + Seek> SsTableLoader<R> {
             let block = {
                 self.reader.seek(SeekFrom::Start(self.end_of_header + start_location))?;
                 let size_of_block = self.reader.read_le::<u32>()?;
-                let mut bytes = Vec::with_capacity(size_of_block as usize);
+                let mut bytes = Vec::new();
+                bytes.resize(size_of_block as usize, 0);
                 self.reader.read_exact(bytes.as_mut_slice())?;
-                let b: CompressionBlock = postcard::from_bytes(bytes.as_slice())?;
+                let b = CompressionBlock::decompress(bytes.as_slice())?;
                 b
             };
             for log in &block.logs {
-                if log.key.as_str() > key || (log.key.as_str() == key && log.sort_key > sort_key) {
+                if log.key.as_str() < key || (log.key.as_str() == key && log.sort_key > sort_key) {
                     return Err(EntryNotPresent)
                 }
                 if log.key.as_str() == key && log.sort_key == sort_key {
@@ -162,7 +163,7 @@ mod tests {
         mt.add("wer", 5, vec![1, 2]).unwrap(); // 3
         mt.add("ert", 6, vec![1, 2]).unwrap();
         mt.add("rty", 7, vec![1, 2]).unwrap();
-        mt.add("tyu", 8, vec![1, 2]).unwrap();
+        mt.add("tyu", 8, vec![2, 3]).unwrap();
         mt.add("yui", 9, vec![1, 2]).unwrap();
         mt.add("uio", 10, vec![1, 2]).unwrap(); // 2
         mt.add("iop", 11, vec![1, 2]).unwrap();
@@ -195,6 +196,6 @@ mod tests {
         assert_eq!(loader.sparse_key_id_table.len(), 5, "Sparse table was not serialized/deserialzed properly.");
 
         // Validate get function
-        loader.get("tyu", 8).unwrap();
+        assert_eq!(loader.get("tyu", 8).unwrap().value, vec![2, 3], "Failed to find a value in an SSTable");
     }
 }
