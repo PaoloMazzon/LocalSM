@@ -36,6 +36,17 @@ pub(crate) struct SsTableLoader<R: BufRead + Seek> {
 }
 
 impl<R: BufRead + Seek> SsTableLoader<R> {
+    /// Gets a compression block from the reader, assuming the pointer is currently at the start
+    /// of the size of the compression block.
+    fn get_compression_block(&mut self) -> Result<CompressionBlock> {
+        let size_of_block = self.reader.read_le::<u32>()?;
+        let mut bytes = Vec::new();
+        bytes.resize(size_of_block as usize, 0);
+        self.reader.read_exact(bytes.as_mut_slice())?;
+        let b = CompressionBlock::decompress(bytes.as_slice())?;
+        Ok(b)
+    }
+
     /// Loads the header out of an SsTable
     pub fn load(mut buffer: R, logger: Logger, config: Config) -> Result<Self> {
         // Validate magic bytes
@@ -90,29 +101,20 @@ impl<R: BufRead + Seek> SsTableLoader<R> {
     }
 
     /// Tries to get a key from an SSTable. Returns None if the requested key is not in the table.
+    /// # Note
+    /// This does *not* consider tombstones.
     pub fn get(&mut self, key: &str, sort_key: i64) -> Result<ILog> {
         if !self.bloom_filter.maybe_in_filter(key) {
             return Err(LsmError::EntryNotPresent)
         }
         let start_location = self.sparse_key_id_table.start_search_from_descending(key, Some(sort_key))
             .ok_or_else(|| LsmError::EntryNotPresent)?;
+        self.reader.seek(SeekFrom::Start(self.end_of_header + start_location))?;
 
-        // Now we search until 1 of three things happens:
-        //  1. We find the entry we want
-        //  2. We locate an entry who's key/sort key are larger than our query
-        //  3. We reach the end of the file
-        // 2 is theoretically impossible but who's to say.
-        let mut attempts = 0;
+        // We loop because it's possible for an entire block to be the same sort key and primary key
+        // if they all have different timestamps.
         loop {
-            let block = {
-                self.reader.seek(SeekFrom::Start(self.end_of_header + start_location))?;
-                let size_of_block = self.reader.read_le::<u32>()?;
-                let mut bytes = Vec::new();
-                bytes.resize(size_of_block as usize, 0);
-                self.reader.read_exact(bytes.as_mut_slice())?;
-                let b = CompressionBlock::decompress(bytes.as_slice())?;
-                b
-            };
+            let block = self.get_compression_block()?;
             for log in &block.logs {
                 if log.key.as_str() < key || (log.key.as_str() == key && log.sort_key > sort_key) {
                     return Err(EntryNotPresent)
@@ -121,19 +123,36 @@ impl<R: BufRead + Seek> SsTableLoader<R> {
                     return Ok(log.clone())
                 }
             }
-
-            // Guarantees no infinite loop
-            attempts += 1;
-            if attempts > self.sparse_key_id_table.len() {
-                error!(logger: self.logger, "Looped for too long while trying to find the key {}:{} with sparse table {:?}.", key, sort_key, self.sparse_key_id_table);
-                return Err(EntryNotPresent)
-            }
         }
     }
 
-    /// Collects all entries with a given key from a map
-    pub fn get_all(&self, key: &str) -> Vec<&ILog> {
-        todo!()
+    /// Collects all entries with a given key from a map, this function will swallow most stream
+    /// related errors implicitly. Prefer get where possible.
+    pub fn get_all(&mut self, key: &str) -> Result<Vec<ILog>> {
+        let mut out_vec = Vec::new();
+        if !self.bloom_filter.maybe_in_filter(key) {
+            return Ok(out_vec)
+        }
+        let start_location = match self.sparse_key_id_table.start_search_from_descending(key, None) {
+            Some(s) => s,
+            None => return Ok(out_vec)
+        };
+        self.reader.seek(SeekFrom::Start(self.end_of_header + start_location))?;
+
+        loop {
+            let block = match self.get_compression_block() {
+                Ok(b) => b,
+                Err(_) => return Ok(out_vec)
+            };
+            for log in &block.logs {
+                if log.key.as_str() < key {
+                    return Ok(out_vec)
+                }
+                if log.key.as_str() == key {
+                    out_vec.push(log.clone());
+                }
+            }
+        }
     }
 }
 
@@ -174,6 +193,9 @@ mod tests {
         mt.add("cvb", 16, vec![1, 2]).unwrap();
         mt.add("vbn", 17, vec![1, 2]).unwrap();
         mt.add("bnm", 18, vec![1, 2]).unwrap();
+        mt.add("bnm", 17, vec![3, 4]).unwrap();
+        mt.add("bnm", 16, vec![5, 6]).unwrap();
+        mt.add("bnm", 15, vec![6, 7]).unwrap();
         mt.add("nm,", 19, vec![1, 2]).unwrap(); // 0
         mt.export_to_sstable(&config, &mut File::create(filename.as_str()).unwrap()).unwrap();
         filename
@@ -193,9 +215,11 @@ mod tests {
         assert_eq!(loader.bloom_filter.maybe_in_filter("asd"), true, "asd was not found in the bloom filter! File parsing probably went wrong.");
         assert_eq!(loader.bloom_filter.maybe_in_filter("fgh"), true, "fgh was not found in the bloom filter! File parsing probably went wrong.");
         assert_eq!(loader.bloom_filter.maybe_in_filter("hjk"), true, "hjk was not found in the bloom filter! File parsing probably went wrong.");
-        assert_eq!(loader.sparse_key_id_table.len(), 5, "Sparse table was not serialized/deserialzed properly.");
+        assert_eq!(loader.sparse_key_id_table.len(), 6, "Sparse table was not serialized/deserialzed properly.");
 
         // Validate get function
         assert_eq!(loader.get("tyu", 8).unwrap().value, vec![2, 3], "Failed to find a value in an SSTable");
+        assert_eq!(loader.get_all("tyu").unwrap().len(), 1, "Get all not functioning properly");
+        assert_eq!(loader.get_all("bnm").unwrap().len(), 4, "Get all not functioning properly");
     }
 }
