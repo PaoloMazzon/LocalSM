@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -28,7 +29,8 @@ impl MemTable {
         })
     }
 
-    /// Creates a MemTable by recovering from a cache file
+    /// Creates a MemTable by recovering from a cache file. This does not delete the cache file, and
+    /// if this succeeds you should do so yourself.
     pub fn recover(cache_file_location: &str) -> crate::util::error::Result<Self> {
         let file = File::open(cache_file_location)?;
         let reader = BufReader::new(file);

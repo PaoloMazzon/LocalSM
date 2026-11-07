@@ -126,7 +126,7 @@ impl<R: BufRead + Seek> SsTableLoader<R> {
         }
     }
 
-    /// Collects all entries with a given key from a map, this function will swallow most stream
+    /// Collects all entries with a given key from a map, this function will clobber most stream
     /// related errors implicitly. Prefer get where possible.
     pub fn get_all(&mut self, key: &str) -> Result<Vec<ILog>> {
         let mut out_vec = Vec::new();

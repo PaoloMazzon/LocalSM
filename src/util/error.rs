@@ -7,10 +7,10 @@ pub enum LsmError {
 
     /// JSON serialization/deserialization has failed
     JsonEncodingError(String),
-    
+
     /// A file was unable to be opened/written to/read from/...
     FileNotAvailable(String),
-    
+
     /// An entry was requested but none was found matching it
     EntryNotPresent,
 
@@ -19,7 +19,7 @@ pub enum LsmError {
 
     /// An error with compression or decompression
     CompressionError(String),
-    
+
     /// We don't know what happened, mainly for debugging/development
     Unknown(String),
 }

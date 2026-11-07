@@ -24,8 +24,11 @@ cargo add localsm --git https://github.com/PaoloMazzon/LocalSM --branch main
    - [x] Sparse key/location lookup table
    - [x] Serializing/deserializing SSTable
    - [x] Encode by blocks, compressing each one
-   - [ ] Find keys through walking files
+   - [x] Find keys through walking files
    - [ ] Iterate over all keys in a file
+ - [ ] Higher-level controller that lets you arbitrarily read/write
  - [ ] Compaction algorithm
  - [ ] High-level public interface
  - [ ] Cryptographic item destruction
+
+# Controller design
