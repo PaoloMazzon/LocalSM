@@ -118,7 +118,7 @@ impl MemTable {
 
     /// Creates a bloom filter from the existing records in this MemTable
     fn create_bloom_filter(&self, config: &Config) -> BloomFilter {
-        let mut bloom = BloomFilter::init(config.bloom_filter_bits as usize, config.bloom_filter_hashes as usize);
+        let mut bloom = BloomFilter::init(config.sstable_config.bloom_filter_bits as usize, config.sstable_config.bloom_filter_hashes as usize);
         for record in &self.records {
             bloom.add(record.key.as_str());
         }
@@ -157,7 +157,7 @@ impl MemTable {
             current_compression_block.add_to_block(record.clone());
 
             // If we should close up this compression block, record the size and move the size
-            if current_compression_block.size() >= config.size_of_compression_blocks as u64 || current_compression_block.logs.len() >= config.maximum_records_per_compression_block as usize {
+            if current_compression_block.size() >= config.sstable_config.size_of_compression_blocks as u64 || current_compression_block.logs.len() >= config.sstable_config.maximum_records_per_compression_block as usize {
                 let compressed = current_compression_block.compress()?;
                 total_size += 4 + compressed.len() as u64;
                 compression_blocks.push(compressed);
@@ -266,7 +266,10 @@ mod tests {
     fn test_serializing_sstable() {
         let mut mt = MemTable::new("/tmp/fake_recover.log".to_string()).unwrap();
         let config = Config {
-            maximum_records_per_compression_block: 5,
+            sstable_config: crate::util::config::SsTableConfig {
+                maximum_records_per_compression_block: 5,
+                ..Default::default()
+            },
             ..Default::default()
         };
         mt.delete("key", 0).unwrap(); // sstable entry
@@ -296,7 +299,10 @@ mod tests {
     fn test_sparse_lookup() {
         let mut mt = MemTable::new("/tmp/asdkjakdjak.log".to_string()).unwrap();
         let config = Config {
-            maximum_records_per_compression_block: 4,
+            sstable_config: crate::util::config::SsTableConfig {
+                maximum_records_per_compression_block: 4,
+                ..Default::default()
+            },
             ..Default::default()
         };
         mt.add("1", 1, vec![0, 1]).unwrap(); // second/third entry

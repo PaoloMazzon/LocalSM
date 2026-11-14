@@ -171,7 +171,10 @@ mod tests {
         let filename = String::from("/tmp/test_sstable");
         let mut mt = MemTable::new("/tmp/asdkjakdjak.log".to_string()).unwrap();
         let config = Config {
-            maximum_records_per_compression_block: 5,
+            sstable_config: crate::util::config::SsTableConfig {
+                maximum_records_per_compression_block: 5,
+                ..Default::default()
+            },
             ..Default::default()
         };
         mt.delete("key", 0).unwrap(); // 4

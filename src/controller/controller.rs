@@ -1,3 +1,5 @@
+use crate::controller::{diskmap::DiskMap, memtable_controller::MemTableController};
+
 /// Higher-level controller that controls both reads and writes going in and out of the system
 pub(crate) struct Controller {
     /// All the MemTables in this controller sit behind a MemTableController
@@ -5,4 +7,5 @@ pub(crate) struct Controller {
     memtables: Vec<MemTableController>,
 
     /// An in-memory map of all the SSTable files on disk
+    on_disk_map: DiskMap,
 }
